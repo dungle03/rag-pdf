@@ -26,15 +26,15 @@
 ```mermaid
 flowchart LR
     U[Người dùng] -- Upload PDF --> S[/FastAPI: /upload/]
-    S --> L[PDF Loader: per-page text + OCR (optional)]
-    L --> C[Chunking: 300-500 tokens, 10-15% overlap]
-    C --> E[Embeddings: Gemini text-embedding-004]
-    E --> V[Vector Store: FAISS / Chroma]
+    S --> L["PDF Loader: per-page text + OCR (optional)"]
+    L --> C["Chunking: 300-500 tokens, 10-15% overlap"]
+    C --> E["Embeddings: Gemini text-embedding-004"]
+    E --> V["Vector Store: FAISS / Chroma"]
     U -- Query --> Q[/FastAPI: /ask/]
-    Q --> R1[Hybrid Retrieve: BM25 + Vector + MMR]
-    R1 --> R2[Rerank (bge-reranker-base) - optional]
-    R2 --> G[Gemini 1.5 Flash]
-    G --> A[Answer + Citations [doc:page]]
+    Q --> R1["Hybrid Retrieve: BM25 + Vector + MMR"]
+    R1 --> R2["Rerank (bge-reranker-base) - optional"]
+    R2 --> G["Gemini 1.5 Flash"]
+    G --> A["Answer + Citations [doc:page]"]
     A --> U
 ```
 
@@ -257,26 +257,31 @@ Avg Latency: 1557.3 ms
 
 ---
 
-## 🛠️ Troubleshooting
-
 ### 1) `API key not valid…` (400)
 - Kiểm tra `.env` có `GEMINI_API_KEY=sk-...` **đúng**.
-- Trong PowerShell:  
+- **Để kiểm tra key**, chạy lệnh sau trong PowerShell (thay `sk-...` bằng key của bạn):
   ```powershell
+  # Gán API key vào biến môi trường tạm thời
   $env:GEMINI_API_KEY = "sk-..."
-  python - <<'PY'
-import google.generativeai as genai, os
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-e = genai.embed_content(model="text-embedding-004", content="ping", task_type="retrieval_document")
-print("OK dim:", len(e["embedding"]))
-PY
-  ```
-- Restart server sau khi đổi `.env`.
-  ```
-Stop-Process -Name python -ErrorAction SilentlyContinue
-. .\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload
   
+  # Chạy script Python ngắn để gọi API
+  @"
+  import google.generativeai as genai, os, sys
+  try:
+      genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+      e = genai.embed_content(model="text-embedding-004", content="ping", task_type="retrieval_document")
+      print(f"API Key hợp lệ. Dimension: {len(e['embedding'])}")
+  except Exception as e:
+      print(f"Lỗi: {e}", file=sys.stderr)
+  "@ | python -
+  ```
+- **Quan trọng**: Restart server sau khi đổi `.env` để server nhận key mới.
+  ```powershell
+  # Dừng tất cả các tiến trình python đang chạy (để dừng server cũ)
+  Stop-Process -Name python -ErrorAction SilentlyContinue
+  
+  # Khởi động lại server
+  uvicorn app.main:app --reload
   ```
 
 
