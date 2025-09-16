@@ -356,10 +356,11 @@ sentence-transformers
 
 ## 👤 Tác giả & Thông tin môn học
 
-- Sinh viên: **[Điền tên]**
+- Sinh viên: **Lê Đình Dũng**
+- Mã sinh viên: **211240089**
 - Môn học: **Chuyên đề CNTT – Bài tập lớn**
 - Năm học: **2025**
-- GV hướng dẫn: **[Điền tên]**
+- GV hướng dẫn: **Lê Đình Dũng**
 
 ---
 
