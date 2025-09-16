@@ -360,7 +360,7 @@ sentence-transformers
 - Mã sinh viên: **211240089**
 - Môn học: **Chuyên đề CNTT – Bài tập lớn**
 - Năm học: **2025**
-- GV hướng dẫn: **Lê Đình Dũng**
+- GV hướng dẫn: **Thầy Bùi Ngọc Dũng**
 
 ---
 
