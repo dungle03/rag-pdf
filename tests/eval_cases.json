@@ -1,0 +1,53 @@
+[
+    {
+        "q": "Làm sao để cài đặt ứng dụng ViettelPay?",
+        "expect_groups": [
+            [
+                "ch play",
+                "chplay",
+                "app store",
+                "appstore"
+            ]
+        ]
+    },
+    {
+        "q": "Tôi có thể thanh toán học phí qua kênh nào?",
+        "expect_groups": [
+            [
+                "viettelpay"
+            ]
+        ]
+    },
+    {
+        "q": "Hotline hỗ trợ thanh toán học phí là gì?",
+        "expect_groups": [
+            [
+                "18009000",
+                "0983.1000.35",
+                "0981180550",
+                "0981.180.550"
+            ]
+        ]
+    },
+    {
+        "q": "Tôi có thể nộp học phí trực tiếp ở đâu?",
+        "expect_groups": [
+            [
+                "viettel post",
+                "cửa hàng viettel",
+                "viettel store",
+                "phòng kế hoạch - tài chính"
+            ]
+        ]
+    },
+    {
+        "q": "Ứng dụng ViettelPay có miễn phí không?",
+        "expect_groups": [
+            [
+                "miễn phí",
+                "mien phi",
+                "free"
+            ]
+        ]
+    }
+]

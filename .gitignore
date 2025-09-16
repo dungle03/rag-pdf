@@ -1,0 +1,21 @@
+# Môi trường ảo
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+
+# Tệp cấu hình môi trường - KHÔNG COMMIT API KEY
+.env
+
+# Thư mục chứa file tạm
+uploads/
+storage/
+
+# Tệp hệ điều hành
+.DS_Store
+Thumbs.db
+
+# Tệp IDE
+.vscode/
+.idea/
