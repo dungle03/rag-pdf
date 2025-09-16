@@ -151,7 +151,7 @@ OCR_LANG=vie
 
 ### 3) Cài đặt OCR (nếu dùng PDF scan)
 
-- **Windows**: cài [Tesseract OCR](https://github.com/tesseract-ocr/tesseract). Mặc định:  
+- **Windows**: cài [Tesseract OCR](https://sourceforge.net/projects/tesseract-ocr.mirror/files/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe/download). Mặc định:  
   `C:\Program Files\Tesseract-OCR\tesseract.exe` → khớp với `TESSERACT_CMD` trong `.env`  
 - **Linux/macOS**: dùng `sudo apt-get install tesseract-ocr` hoặc `brew install tesseract`.
 
