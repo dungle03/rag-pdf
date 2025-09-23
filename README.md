@@ -33,18 +33,20 @@
 
 ```mermaid
 flowchart LR
-    U[Người dùng] -- Upload PDF --> S[FastAPI Backend]
-    S --> L[PDF Loader + OCR]
-    L --> C[Chunking]
-    C --> E[Embeddings (Gemini)]
-    E --> V[Vector Store (FAISS/Chroma)]
-    U -- Query --> Q[Ask Endpoint]
-    Q --> R1[Hybrid Retrieve]
-    R1 --> R2[Rerank (optional)]
-    R2 --> G[Gemini Generator]
-    G --> A[Answer + Citations]
+    U["Người dùng"] -- "Upload PDF" --> S["FastAPI Backend"]
+    S --> L["PDF Loader + OCR"]
+    L --> C["Chunking"]
+    C --> E["Embeddings (Gemini)"]
+    E --> V["Vector Store (FAISS or Chroma)"]
+    U -- "Query" --> Q["Ask Endpoint"]
+    Q --> R1["Hybrid Retrieve"]
+    R1 --> R2["Rerank (optional)"]
+    R2 --> G["Gemini Generator"]
+    G --> A["Answer + Citations"]
     A --> U
 ```
+
+> Nếu vẫn gặp lỗi render Mermaid trên một số viewer Markdown, hãy xem file trực tiếp trên GitHub (Mermaid được bật sẵn) hoặc dùng VS Code với extension “Markdown Preview Mermaid Support”.
 
 ---
 
