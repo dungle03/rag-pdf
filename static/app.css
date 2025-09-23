@@ -386,6 +386,31 @@ body {
   border: 1px solid var(--border-color);
   border-bottom-left-radius: 0.25rem;
   margin-right: auto;
+  white-space: pre-line;
+  /* Preserve line breaks */
+  word-wrap: break-word;
+}
+
+/* Citation reference styling */
+.citation-ref {
+  background-color: var(--primary-color);
+  color: white;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin: 0 0.2rem;
+  display: inline-block;
+}
+
+/* Better text formatting in chat bubbles */
+.chat-bubble strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-bubble br {
+  line-height: 1.5;
 }
 
 .chat-bubble.loading {

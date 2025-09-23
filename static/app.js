@@ -418,6 +418,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // --- Format text for better display ---
+  const formatTextContent = (text) => {
+    if (!text) return '';
+
+    // Convert markdown-style formatting to HTML
+    let formatted = text
+      // Convert **bold** to <strong>
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Convert bullet points
+      .replace(/^• /gm, '&nbsp;&nbsp;• ')
+      // Convert line breaks to <br>
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>')
+      // Add proper spacing after sections
+      .replace(/(<br><br>)/g, '<br><br>')
+      // Style citation references
+      .replace(/\[([^\]]+)\]/g, '<span class="citation-ref">[$1]</span>');
+
+    return formatted;
+  };
+
   // --- Chat ---
   const addChatMessage = (type, content) => {
     if (dom.welcomeScreen) {
@@ -428,7 +449,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (type === 'ai' && !content) {
       bubble.innerHTML = `<div class="d-flex align-items-center"><div class="dot-flashing"></div></div>`;
     } else {
-      bubble.innerHTML = content; // Use innerHTML to render markdown
+      // Format content for better display
+      bubble.innerHTML = type === 'ai' ? formatTextContent(content) : content;
     }
     dom.chatContainer.appendChild(bubble);
     dom.chatContainer.scrollTop = dom.chatContainer.scrollHeight;
@@ -456,7 +478,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!response.ok) throw new Error(result.error || 'Ask failed');
 
-      loadingBubble.innerHTML = result.answer;
+      // Format the answer properly before displaying
+      loadingBubble.innerHTML = formatTextContent(result.answer);
       renderCitations(result.sources);
 
     } catch (error) {

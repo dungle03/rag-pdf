@@ -210,11 +210,11 @@ async def ask(
         print(f"Received query: {query.strip()[:100]}... for session: {session_id}")
         t0 = time.time()
 
-        # === cấu hình truy vấn (vector-only) ===
-        TOP_K = get_int("RETRIEVE_TOP_K", 10)
-        CONTEXT_K = get_int("CONTEXT_K", 6)
-        MMR_LAMBDA = get_float("MMR_LAMBDA", 0.5)
-        RERANK_ON = get_bool("RERANK_ON", False)
+        # === cấu hình truy vấn cân bằng chất lượng vs chi phí ===
+        TOP_K = get_int("RETRIEVE_TOP_K", 10)  # Sử dụng giá trị từ .env
+        CONTEXT_K = get_int("CONTEXT_K", 6)  # Sử dụng giá trị từ .env
+        MMR_LAMBDA = get_float("MMR_LAMBDA", 0.6)  # Diversity cao hơn cho chất lượng
+        RERANK_ON = get_bool("RERANK_ON", True)  # Bật rerank để chọn chunks tốt nhất
         ENABLE_ANSWER_CACHE = get_bool("ENABLE_ANSWER_CACHE", True)
         HYBRID_ON = get_bool("HYBRID_ON", True)
         HYBRID_ALPHA = get_float("HYBRID_ALPHA", 0.5)
