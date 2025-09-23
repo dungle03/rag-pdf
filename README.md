@@ -20,38 +20,68 @@ Hệ thống đặc biệt phù hợp cho việc học tập, nghiên cứu, và
 
 ## 🏗️ Kiến trúc & Công nghệ chính
 
-### Kiến trúc hệ thống
+### Luồng xử lý RAG chi tiết
 
 ```mermaid
-flowchart TB
-    subgraph "Frontend"
-        UI[Web Interface<br/>Bootstrap + Vanilla JS]
+flowchart LR
+    U[👤 Người dùng] -- "Upload PDF" --> S[🚀 FastAPI: /upload]
+    S --> L["📄 PDF Loader<br/>pypdfium2/pymupdf + OCR"]
+    L --> C["✂️ Chunking<br/>300-500 tokens<br/>10-15% overlap"]
+    C --> E["🧠 Embeddings<br/>Gemini text-embedding-004"]
+    E --> V["💾 Vector Store<br/>FAISS / Chroma + MMR"]
+    
+    U -- "❓ Query" --> Q[🔍 FastAPI: /ask]
+    Q --> R1["🔎 Hybrid Retrieve<br/>BM25 + Vector + MMR"]
+    R1 --> R2["🎯 Rerank<br/>bge-reranker-base (optional)"]
+    R2 --> G["✨ Gemini 1.5 Flash<br/>RAG prompt tiếng Việt"]
+    G --> A["📋 Answer + Citations<br/>[doc:page] format"]
+    A --> U
+    
+    E -.-> EC[💰 Embed Cache<br/>SHA1-based SQLite]
+    G -.-> AC[💾 Answer Cache<br/>Query + DocSet]
+    S -.-> FS[📁 File Storage<br/>Session-based uploads]
+```
+
+### Kiến trúc tổng thể hệ thống
+
+```mermaid
+graph TB
+    subgraph "🌐 Frontend Layer"
+        UI[Web Interface<br/>Bootstrap 5 + Vanilla JS<br/>Responsive Design]
     end
     
-    subgraph "Backend API"
-        API[FastAPI<br/>RESTful Endpoints]
-        ROUTES[Routes Layer<br/>upload, ingest, ask]
+    subgraph "🔌 API Gateway"
+        API[FastAPI Application<br/>ASGI + Uvicorn<br/>CORS + Middleware]
+        ROUTES[Routes Controller<br/>/, /upload, /ingest<br/>/ask, /docs, /healthz]
     end
     
-    subgraph "RAG Engine"
-        LOADER[PDF Loader<br/>pypdfium2 + OCR]
-        CHUNK[Text Chunking<br/>Token-aware splitting]
-        EMBED[Embeddings<br/>Gemini API]
-        VECTOR[Vector Store<br/>FAISS/Chroma]
-        SEARCH[Hybrid Search<br/>BM25 + Vector + MMR]
-        RERANK[Reranker<br/>BGE CrossEncoder]
-        GEN[Generator<br/>Gemini 1.5 Flash]
+    subgraph "🧠 RAG Processing Engine"
+        LOADER[📄 Document Loader<br/>pypdfium2 + Tesseract OCR<br/>Header/Footer Detection]
+        CHUNK[✂️ Smart Chunking<br/>tiktoken-based<br/>Token-aware splitting]
+        EMBED[🔗 Embedding Engine<br/>Gemini API + ThreadPool<br/>Concurrent Processing]
+        VECTOR[💾 Vector Database<br/>FAISS IndexFlatIP<br/>Cosine Similarity]
+        SEARCH[🔍 Hybrid Retrieval<br/>BM25 (sparse) + Vector (dense)<br/>MMR Diversity]
+        RERANK[🎯 Cross-Encoder<br/>BGE-reranker-base<br/>Precision Boost]
+        GEN[✨ LLM Generator<br/>Gemini 1.5 Flash<br/>Citation-aware Prompts]
     end
     
-    subgraph "Storage & Cache"
-        FILES[File Storage<br/>Session-based]
-        VCACHE[Vector Cache<br/>SQLite]
-        ACACHE[Answer Cache<br/>SQLite]
+    subgraph "💾 Storage & Cache Layer"
+        FILES[📁 File System<br/>Session-based Storage<br/>/uploads/{session_id}/]
+        ECACHE[⚡ Embedding Cache<br/>SQLite + SHA1 Keys<br/>90% API Call Reduction]
+        ACACHE[🗃️ Answer Cache<br/>SQLite + Query Hashing<br/>Instant Responses]
+        LOGS[📊 Structured Logs<br/>JSON Format<br/>Performance Metrics]
+    end
+    
+    subgraph "🛡️ Security & Monitoring"
+        VALID[✅ Input Validation<br/>MIME + File Size<br/>PDF Signature Check]
+        RATE[⏱️ Rate Limiting<br/>Per-IP + Per-Endpoint<br/>DDoS Protection]
+        ERROR[🚨 Error Handling<br/>Comprehensive Exceptions<br/>User-friendly Messages]
     end
     
     UI --> API
     API --> ROUTES
-    ROUTES --> LOADER
+    ROUTES --> VALID
+    VALID --> LOADER
     LOADER --> CHUNK
     CHUNK --> EMBED
     EMBED --> VECTOR
@@ -59,78 +89,98 @@ flowchart TB
     SEARCH --> RERANK
     RERANK --> GEN
     
-    EMBED -.-> VCACHE
+    EMBED -.-> ECACHE
     GEN -.-> ACACHE
     LOADER -.-> FILES
+    API -.-> RATE
+    ROUTES -.-> ERROR
+    GEN -.-> LOGS
 ```
 
 ### Công nghệ sử dụng
 
-#### Backend Framework
-- **FastAPI**: High-performance async web framework
-- **Uvicorn**: ASGI server với khả năng scale cao
-- **Pydantic**: Data validation và serialization
+#### 🚀 Backend Framework
+- **FastAPI**: High-performance async web framework với auto-documentation
+- **Uvicorn**: ASGI server với khả năng scale cao và hot-reload
+- **Pydantic**: Data validation, serialization và type safety
 
-#### AI & Machine Learning
+#### 🤖 AI & Machine Learning Stack
 - **Google Gemini API**: 
-  - `text-embedding-004` cho embeddings
-  - `gemini-1.5-flash` cho text generation
-- **FAISS**: Facebook AI Similarity Search - vector database
-- **BGE Reranker**: Cross-encoder cho re-ranking kết quả
-- **BM25**: Sparse retrieval algorithm
-- **MMR**: Maximal Marginal Relevance cho đa dạng hóa
+  - `text-embedding-004` (768 dimensions) cho vector embeddings
+  - `gemini-1.5-flash` cho text generation với context window lớn
+- **FAISS**: Facebook AI Similarity Search - vector database tối ưu cho cosine similarity
+- **BGE Reranker**: BAAI/bge-reranker-base cross-encoder cho re-ranking precision
+- **BM25**: Sparse retrieval algorithm cho keyword matching
+- **MMR**: Maximal Marginal Relevance cho đa dạng hóa kết quả
 
-#### Document Processing
-- **pypdfium2**: PDF text extraction
-- **Tesseract OCR**: Optical Character Recognition
-- **tiktoken**: Token counting và chunking
+#### 📄 Document Processing Pipeline
+- **pypdfium2**: PDF text extraction với performance cao
+- **pymupdf**: Fallback PDF processor cho các trường hợp đặc biệt
+- **Tesseract OCR**: Optical Character Recognition cho PDF scan/ảnh
+- **tiktoken**: OpenAI tokenizer cho chunking chính xác theo tokens
 
-#### Frontend
-- **Bootstrap 5**: Responsive UI framework
-- **Vanilla JavaScript**: Lightweight client-side logic
-- **Jinja2**: Server-side templating
+#### 🎨 Frontend Technology
+- **Bootstrap 5**: Responsive UI framework với dark/light theme
+- **Vanilla JavaScript**: Lightweight client-side logic, không dependencies
+- **Jinja2**: Server-side templating engine cho FastAPI
 
-#### Storage & Caching
-- **SQLite**: Local database cho cache
-- **File System**: Session-based file management
+#### 💾 Storage & Performance
+- **SQLite**: Local database cho embedding và answer cache
+- **File System**: Session-based file management với security validation
+- **Multi-threading**: Concurrent embedding generation với ThreadPool
 
 ---
 
 ## ✨ Tính năng nổi bật
 
-### 🔄 Quy trình xử lý tài liệu
-- **Upload đa file**: Hỗ trợ tải lên đến 5 file PDF cùng lúc (≤ 10MB/file)
-- **Kiểm tra tính hợp lệ**: Validation MIME type và chữ ký PDF
-- **OCR tích hợp**: Xử lý tài liệu scan/ảnh với Tesseract
-- **Text chunking thông minh**: Token-aware splitting (300-500 tokens, overlap 10-15%)
-- **Loại bỏ noise**: Tự động phát hiện và loại bỏ header/footer lặp
+### � Xử lý tài liệu PDF thông minh
+- **Upload đa file**: Hỗ trợ tải lên đến **5 file PDF** cùng lúc (≤ **10MB/file**)
+- **Validation nghiêm ngặt**: Kiểm tra MIME type `application/pdf` và chữ ký PDF `%PDF`
+- **OCR tích hợp**: Xử lý tài liệu scan/ảnh với **Tesseract OCR** (vie+eng)
+- **Text chunking thông minh**: Token-aware splitting (**300-500 tokens**, overlap **10-15%**)
+- **Noise removal**: Tự động phát hiện và loại bỏ header/footer lặp lại
+- **Session isolation**: Mỗi người dùng có workspace riêng biệt
 
-### 🔍 Công cụ tìm kiếm nâng cao
-- **Hybrid Search**: Kết hợp BM25 (sparse) và Vector search (dense)
-- **MMR (Maximal Marginal Relevance)**: Đa dạng hóa kết quả tìm kiếm
-- **Reranking**: BGE cross-encoder để cải thiện độ chính xác
-- **Confidence scoring**: Đánh giá độ tin cậy của câu trả lời
+### 🔍 Hệ thống tìm kiếm lai (Hybrid Search)
+- **Dense Retrieval**: Vector search với cosine similarity trên Gemini embeddings
+- **Sparse Retrieval**: BM25 algorithm cho keyword matching chính xác
+- **Hybrid Fusion**: Kết hợp BM25 + Vector với trọng số **alpha=0.5** có thể điều chỉnh
+- **MMR Diversification**: Maximal Marginal Relevance (λ=0.5) để đa dạng hóa kết quả
+- **Cross-Encoder Reranking**: BGE reranker-base để cải thiện độ chính xác top-K
+- **Configurable Parameters**: 
+  - `RETRIEVE_TOP_K=12` candidates
+  - `CONTEXT_K=6` final contexts
+  - `MMR_LAMBDA=0.5` diversity factor
 
-### 🧠 Sinh trả lời thông minh
-- **Context-aware generation**: Sử dụng Gemini 1.5 Flash
-- **Trích dẫn bắt buộc**: Format [doc:page] cho mọi thông tin
-- **Guardrail**: Chỉ trả lời dựa trên nội dung tài liệu
-- **Đa ngôn ngữ**: Tối ưu cho tiếng Việt
+### 🧠 Sinh câu trả lời thông minh
+- **Context-aware Generation**: Sử dụng **Gemini 1.5 Flash** với prompt engineering
+- **Mandatory Citations**: Bắt buộc format **[doc:page]** cho mọi thông tin trích dẫn
+- **Guardrail System**: `GENERATE_MIN_SIM=0.20` để tránh hallucination
+- **Vietnamese Optimization**: Prompt được tối ưu cho tiếng Việt
+- **Confidence Scoring**: Tính toán độ tin cậy dựa trên vector similarity
+- **Temperature Control**: `temperature=0.1` cho output ổn định
 
-### 🚀 Tối ưu hiệu năng
-- **Multi-layer caching**: 
-  - Embedding cache (SHA1-based)
-  - Answer cache (query + document set)
-- **Concurrent processing**: Thread pool cho embedding generation
-- **Session management**: Cách ly dữ liệu theo người dùng
-- **Rate limiting**: Bảo vệ API endpoints
+### ⚡ Tối ưu hiệu năng & Cache
+- **Multi-layer Caching**: 
+  - **Embedding Cache**: SHA1-based trong SQLite (giảm 90% API calls)
+  - **Answer Cache**: Query + DocumentSet hashing cho instant responses
+- **Concurrent Processing**: ThreadPool với `EMBED_CONCURRENCY=4` cho batch embedding
+- **Session Management**: Cách ly dữ liệu theo `session_id` UUID
+- **Rate Limiting**: Bảo vệ API endpoints:
+  - `/upload`: 5 requests/minute
+  - `/ingest`: 3 requests/5 minutes  
+  - `/ask`: 30 requests/minute
 
-### 🛡️ Bảo mật & Monitoring
-- **Input validation**: Kiểm tra kích thước, format, nội dung
-- **File sanitization**: Làm sạch tên file và đường dẫn
-- **Structured logging**: Chi tiết hoạt động hệ thống
-- **Error handling**: Xử lý ngoại lệ toàn diện
-- **Health checks**: Monitoring endpoint
+### 🛡️ Bảo mật & Monitoring Production-Ready
+- **Input Validation**: 
+  - File size limits và MIME type checking
+  - PDF signature validation (`%PDF` header)
+  - Filename sanitization với regex pattern
+- **Security Headers**: CORS configuration và security middleware
+- **Structured Logging**: JSON format logs trong `./logs/` với rotation
+- **Error Handling**: Comprehensive exception handling với user-friendly messages
+- **Health Monitoring**: `/healthz` endpoint cho load balancer checks
+- **Memory Management**: Streaming file upload để tránh memory overflow
 
 ---
 
@@ -176,41 +226,61 @@ Tạo file `.env` từ template:
 cp .env.example .env
 ```
 
-Chỉnh sửa file `.env`:
+Chỉnh sửa file `.env` với cấu hình đầy đủ:
 ```ini
-# === AI Models ===
+# === AI Models Configuration ===
 GEMINI_API_KEY=your_actual_api_key_here
 RAG_EMBED_MODEL=text-embedding-004
 RAG_LLM_MODEL=gemini-1.5-flash
 EMBED_DIM=768
 
-# === Retrieval Settings ===
-HYBRID_ON=true
-HYBRID_ALPHA=0.5
-RETRIEVE_TOP_K=12
-CONTEXT_K=6
-MMR_LAMBDA=0.5
+# === Retrieval & Search Settings ===
+HYBRID_ON=true                    # Bật hybrid search (BM25 + Vector)
+HYBRID_ALPHA=0.5                  # Trọng số BM25 vs Vector (0.5 = cân bằng)
+RETRIEVE_TOP_K=12                 # Số candidates ban đầu
+CONTEXT_K=6                       # Số contexts cuối cùng cho LLM
+MMR_LAMBDA=0.5                    # Diversity factor cho MMR
 
-# === Reranking (Optional) ===
-RERANK_ON=true
+# === Reranking (Optional - tăng accuracy) ===
+RERANK_ON=true                    # Bật BGE reranker (tăng latency ~500ms)
 
-# === Generation ===
-GENERATE_MIN_SIM=0.20
+# === Generation Settings ===
+GENERATE_MIN_SIM=0.20             # Threshold tối thiểu để sinh câu trả lời
+GEN_TEMPERATURE=0.1               # Temperature cho generation (0.1 = ổn định)
+GEN_MAX_OUTPUT_TOKENS=256         # Giới hạn độ dài output
 
-# === Storage ===
-VECTOR_STORE=faiss
+# === Storage & Caching ===
+VECTOR_STORE=faiss                # faiss hoặc chroma
 PERSIST_DIR=./storage
-ENABLE_EMBED_CACHE=true
-ENABLE_ANSWER_CACHE=true
+ENABLE_EMBED_CACHE=true           # Cache embeddings (giảm 90% API calls)
+EMBED_CACHE_DB=./storage/embed_cache.sqlite
+ENABLE_ANSWER_CACHE=true          # Cache câu trả lời
+ANSWER_CACHE_DB=./storage/answer_cache.sqlite
 
-# === File Upload ===
-MAX_FILES=5
-MAX_FILE_MB=10
+# === File Upload Constraints ===
+MAX_FILES=5                       # Tối đa 5 files/lần
+MAX_FILE_MB=10                    # Tối đa 10MB/file
+UPLOAD_DIR=./uploads
 
-# === OCR (Optional) ===
-TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
-OCR_LANG=vie+eng
+# === OCR Configuration (Optional) ===
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe  # Windows
+# TESSERACT_CMD=/usr/bin/tesseract  # Linux/macOS
+OCR_LANG=vie+eng                  # Ngôn ngữ OCR (Vietnamese + English)
+
+# === Performance Tuning ===
+EMBED_CONCURRENCY=4               # Số threads cho embedding generation
+EMBED_SLEEP_MS=100                # Delay giữa API calls (tránh rate limit)
+
+# === Chunking Parameters ===
+CHUNK_SIZE=380                    # Kích thước chunk (tokens)
+CHUNK_OVERLAP=50                  # Overlap giữa chunks (tokens)
 ```
+
+> **💡 Lưu ý quan trọng:**
+> - **GEMINI_API_KEY**: Lấy từ [Google AI Studio](https://aistudio.google.com/) (miễn phí)
+> - **HYBRID_ALPHA**: 0.5 = cân bằng, >0.5 = ưu tiên BM25, <0.5 = ưu tiên Vector
+> - **RERANK_ON**: `true` tăng accuracy nhưng tăng latency, `false` để demo nhanh
+> - **Cache**: Bật để tiết kiệm API quota khi test/demo nhiều lần
 
 #### Bước 3: Cài đặt OCR (Tuỳ chọn)
 
@@ -303,16 +373,16 @@ curl -X POST "http://localhost:8000/ask" \
   -d "session_id=test-session&query=Nội dung chính của tài liệu là gì?"
 ```
 
-### API Endpoints
+### API Endpoints chi tiết
 
-| Endpoint | Method | Mô tả |
-|----------|--------|--------|
-| `/` | GET | Trang chủ web interface |
-| `/upload` | POST | Upload PDF files |
-| `/ingest` | POST | Xử lý và vector hóa tài liệu |
-| `/ask` | POST | Đặt câu hỏi |
-| `/docs` | GET | Liệt kê tài liệu đã xử lý |
-| `/healthz` | GET | Health check |
+| Endpoint | Method | Mô tả | Request Format | Response Format |
+|----------|--------|--------|----------------|-----------------|
+| `/` | GET | Trang chủ web interface | - | HTML template |
+| `/upload` | POST | Upload PDF files | **Form fields:**<br/>• `files`: MultiPart file array<br/>• `session_id`: UUID (optional) | ```json<br/>{ "session_id": "uuid", "files": [{"path": "./uploads/<session>/a.pdf", "name": "a.pdf", "size": 1024}] }``` |
+| `/ingest` | POST | Xử lý và vector hóa tài liệu | **Form fields:**<br/>• `session_id`: UUID string<br/>• `ocr`: boolean (optional) | ```json<br/>{"ingested": [{"doc": "a.pdf", "pages": 10, "chunks": 35}], "total_chunks": 35, "latency_ms": 9123}``` |
+| `/ask` | POST | Đặt câu hỏi RAG | **Form fields:**<br/>• `query`: Vietnamese text<br/>• `session_id`: UUID<br/>• `selected_docs`: JSON array (optional) | ```json<br/>{"answer": "… [a.pdf:3] …", "confidence": 0.91, "sources": [...], "latency_ms": 1234}``` |
+| `/docs` | GET | Liệt kê tài liệu đã xử lý | - | ```json<br/>{"sessions": [{"session_id": "...", "docs": [...]}]}``` |
+| `/healthz` | GET | Health check endpoint | - | ```json<br/>{"status": "ok"}``` |
 
 ---
 
@@ -372,68 +442,127 @@ Metrics được theo dõi:
 
 ## 🔧 Đóng góp & Phát triển
 
-### Cấu trúc dự án
+### Cấu trúc dự án chi tiết
 
 ```
 rag-pdf/
-├── app/                    # Ứng dụng chính
-│   ├── main.py            # FastAPI app initialization
-│   ├── routes.py          # API endpoints
-│   ├── rag/               # RAG engine
-│   │   ├── pdf_loader.py  # PDF processing & OCR
-│   │   ├── chunking.py    # Text chunking logic
-│   │   ├── embeddings.py  # Embedding generation & cache
-│   │   ├── vectorstore.py # FAISS vector database
-│   │   ├── hybrid.py      # Hybrid search (BM25 + Vector)
-│   │   ├── rerank.py      # Cross-encoder reranking
-│   │   ├── generator.py   # Answer generation
-│   │   ├── answer_cache.py # Answer caching
-│   │   └── cache.py       # Embedding cache utilities
-│   └── utils/             # Utilities
-│       ├── config.py      # Configuration management
-│       ├── logger.py      # Structured logging
-│       ├── security.py    # Input validation & security
-│       ├── monitoring.py  # Error handling & metrics
-│       ├── rate_limiter.py # API rate limiting
-│       ├── schema.py      # Data models
-│       └── hash.py        # Hashing utilities
-├── static/                # Frontend assets
-│   ├── app.css           # Responsive UI styles
-│   └── app.js            # Client-side logic
-├── templates/             # HTML templates
-│   └── index.html        # Main web interface
-├── tests/                 # Test suite
-│   ├── eval_cases.json   # Test scenarios
-│   ├── simple_test.py    # Quick workflow test
-│   └── run_eval.py       # Detailed evaluation
-├── storage/               # Runtime data
-├── uploads/               # Session-based file storage
-├── logs/                  # Application logs
-├── requirements.txt       # Python dependencies
-├── .env.example          # Environment template
-└── README.md             # Documentation
+├── app/                           # 🚀 Core Application
+│   ├── main.py                   # FastAPI app initialization + CORS + static mounting
+│   ├── routes.py                 # API endpoints với error handling
+│   ├── rag/                      # 🧠 RAG Engine - Toàn bộ logic AI
+│   │   ├── pdf_loader.py         # PDF processing: pypdfium2 + OCR + header/footer removal
+│   │   ├── chunking.py           # Token-aware text chunking với tiktoken
+│   │   ├── embeddings.py         # Gemini embedding + SHA1 cache + ThreadPool
+│   │   ├── vectorstore.py        # FAISS wrapper: IndexFlatIP + MMR + persistence
+│   │   ├── hybrid.py             # BM25 + Vector fusion + diversity ranking
+│   │   ├── rerank.py             # BGE cross-encoder reranking (optional)
+│   │   ├── generator.py          # Gemini 1.5 Flash + citation-aware prompts
+│   │   ├── answer_cache.py       # SQLite-based answer caching
+│   │   └── cache.py              # Embedding cache utilities
+│   └── utils/                    # 🛠️ Production Utilities
+│       ├── config.py             # Environment variable parsing + validation
+│       ├── logger.py             # Structured logging với JSON format
+│       ├── security.py           # Input validation + file sanitization + MIME check
+│       ├── monitoring.py         # Error handling + metrics collection
+│       ├── rate_limiter.py       # Per-IP rate limiting cho API endpoints
+│       ├── schema.py             # Pydantic models cho request/response
+│       └── hash.py               # SHA1 hashing cho cache keys
+├── static/                       # 🎨 Frontend Assets
+│   ├── app.css                  # Responsive CSS: Bootstrap 5 + custom theming
+│   └── app.js                   # Vanilla JS: file upload + chat interface + citations
+├── templates/                    # 📄 HTML Templates
+│   └── index.html               # Jinja2 template: 3-column layout + dark/light theme
+├── tests/                        # 🧪 Test Suite
+│   ├── eval_cases.json          # Test scenarios: questions + expected keywords
+│   ├── simple_test.py           # End-to-end workflow test (upload→ingest→ask)
+│   └── run_eval.py              # Detailed evaluation với accuracy metrics
+├── storage/                      # 💾 Runtime Data (auto-created)
+│   ├── embed_cache.sqlite       # Embedding cache database
+│   ├── answer_cache.sqlite      # Answer cache database
+│   └── faiss_index.bin          # FAISS vector index files
+├── uploads/                      # 📁 Session-based File Storage
+│   └── {session_id}/            # Isolated directories per user session
+│       ├── document.pdf         # Uploaded PDF files
+│       ├── manifest.json        # Session metadata + processing info
+│       └── faiss_index.bin      # Session-specific FAISS index
+├── logs/                         # 📊 Application Logs (auto-created)
+│   └── rag_pdf_YYYYMMDD.log     # Daily log files với structured format
+├── .venv/                        # 🐍 Python Virtual Environment
+├── requirements.txt              # 📋 Python dependencies với version pinning
+├── .env.example                  # 📝 Environment configuration template
+├── .env                          # 🔒 Production environment variables (git-ignored)
+├── .gitignore                    # 🚫 Git exclusions: .env, uploads/, storage/, logs/
+└── README.md                     # 📖 This documentation
 ```
 
-### Development Guidelines
+### 🔧 Thêm tính năng mới
 
-#### Thêm tính năng mới
-1. Fork repository
-2. Tạo feature branch: `git checkout -b feature/amazing-feature`
-3. Implement với tests
-4. Commit: `git commit -m 'Add amazing feature'`
-5. Push: `git push origin feature/amazing-feature`
-6. Tạo Pull Request
+#### Workflow Development
+1. **Fork & Branch**
+   ```bash
+   git clone https://github.com/your-username/rag-pdf.git
+   cd rag-pdf
+   git checkout -b feature/awesome-feature
+   ```
 
-#### Code Style
-- Tuân thủ PEP 8
-- Type hints cho tất cả functions
-- Docstrings cho modules và classes
-- Error handling comprehensive
+2. **Setup Development Environment**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Linux/Mac
+   pip install -r requirements.txt
+   pip install -e .  # Editable install
+   ```
 
-#### Testing
-- Unit tests cho các components riêng lẻ
-- Integration tests cho workflow
-- Performance benchmarks
+3. **Implement với Testing**
+   ```bash
+   # Tạo tests cho feature mới
+   echo '{"q": "Test question?", "expected": ["keyword"]}' >> tests/eval_cases.json
+   
+   # Run tests
+   python tests/simple_test.py
+   python tests/run_eval.py
+   ```
+
+4. **Code Quality Checks**
+   ```bash
+   # Format code
+   black app/ tests/
+   
+   # Type checking
+   mypy app/
+   
+   # Linting
+   flake8 app/ tests/
+   ```
+
+5. **Commit & Push**
+   ```bash
+   git add .
+   git commit -m "feat: add awesome feature with tests"
+   git push origin feature/awesome-feature
+   ```
+
+#### 📝 Code Style Guidelines
+- **Type Hints**: Bắt buộc cho tất cả functions và class methods
+- **Docstrings**: Google style cho modules, classes và public functions
+- **Error Handling**: Sử dụng custom exceptions và structured error responses
+- **Logging**: Structured logging với contextual information
+- **Testing**: Unit tests + integration tests cho mọi feature mới
+
+#### 🧪 Testing Strategy
+```bash
+# Unit tests cho individual components
+python -m pytest tests/unit/ -v
+
+# Integration tests cho entire workflow  
+python -m pytest tests/integration/ -v
+
+# Performance benchmarks
+python tests/benchmark.py
+
+# Load testing với multiple sessions
+python tests/load_test.py --sessions 10 --queries 100
+```
 
 ### Roadmap tính năng
 
@@ -499,42 +628,145 @@ Cảm ơn các công nghệ và thư viện mã nguồn mở:
 
 ## 🆘 Hỗ trợ & Troubleshooting
 
-### Các lỗi thường gặp
+### Các lỗi thường gặp và cách khắc phục
 
-#### 1. API Key Issues
+#### 1. 🔑 Lỗi API Key
 ```bash
-# Lỗi: "API key not valid"
-# Giải pháp: Kiểm tra API key trong .env
+# Lỗi: "API key not valid" hoặc 400 Bad Request
+# Nguyên nhân: GEMINI_API_KEY không đúng hoặc chưa set
+
+# Kiểm tra API key:
 export GEMINI_API_KEY="your-actual-key"
+
+# Test API key bằng Python:
+python -c "
+import google.generativeai as genai, os
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+result = genai.embed_content(model='text-embedding-004', content='test')
+print(f'✅ API Key valid! Dimension: {len(result[\"embedding\"])}')
+"
+
+# ⚠️ Quan trọng: Restart server sau khi đổi .env
 uvicorn app.main:app --reload
 ```
 
-#### 2. Tesseract OCR Issues
+#### 2. 🖼️ Lỗi Tesseract OCR
 ```bash
-# Lỗi: "tesseract is not installed"
-# Windows: Cài đặt từ official installer
-# macOS: brew install tesseract  
-# Linux: sudo apt-get install tesseract-ocr
+# Lỗi: "tesseract is not installed or it's not in your PATH"
+
+# Windows - Cài đặt Tesseract:
+# 1. Tải từ: https://github.com/UB-Mannheim/tesseract/wiki
+# 2. Cài vào: C:\Program Files\Tesseract-OCR\
+# 3. Cập nhật .env: TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+
+# macOS:
+brew install tesseract
+
+# Ubuntu/Debian:
+sudo apt-get update
+sudo apt-get install tesseract-ocr tesseract-ocr-vie
+
+# ⚠️ Nếu không cần OCR: Bỏ tick "Sử dụng OCR" trong UI
 ```
 
-#### 3. FAISS Installation Issues
+#### 3. 💾 Lỗi FAISS Installation
 ```bash
-# Nếu faiss-cpu lỗi trên Windows:
+# Lỗi: Cannot install faiss-cpu (thường trên Windows)
+
+# Giải pháp 1: Reinstall với cache clear
 pip uninstall faiss-cpu
-pip install faiss-cpu --no-cache-dir
+pip install faiss-cpu --no-cache-dir --force-reinstall
 
-# Hoặc chuyển sang Chroma:
+# Giải pháp 2: Chuyển sang ChromaDB
 # Trong .env: VECTOR_STORE=chroma
+pip install chromadb
+
+# Giải pháp 3: Conda environment
+conda install -c conda-forge faiss-cpu
 ```
 
-#### 4. Memory Issues
+#### 4. 🧠 Lỗi Memory/Performance
 ```bash
-# Giảm batch size cho embedding:
+# Lỗi: Out of memory hoặc quá chậm
+
+# Giảm batch size embedding:
 export EMBED_CONCURRENCY=2
 
 # Giảm context window:
 export CONTEXT_K=4
 export RETRIEVE_TOP_K=8
+
+# Tắt reranker để tiết kiệm memory:
+export RERANK_ON=false
+
+# Giảm chunk size:
+export CHUNK_SIZE=300
+export CHUNK_OVERLAP=30
+```
+
+#### 5. 🚫 Lỗi Vector Store
+```bash
+# Lỗi: "Vector store chưa khởi tạo" hoặc "Index empty"
+
+# Nguyên nhân: Chưa chạy /ingest trước /ask
+# Giải pháp:
+# 1. Upload files qua /upload
+# 2. Chạy /ingest để tạo embeddings
+# 3. Sau đó mới /ask
+
+# Clear storage nếu bị corrupt:
+rm -rf storage/
+rm -rf uploads/
+```
+
+#### 6. 🐛 Lỗi Dependencies
+```bash
+# Lỗi: ModuleNotFoundError cho các thư viện
+
+# Cài đầy đủ dependencies:
+pip install -r requirements.txt
+
+# Nếu bị conflict, tạo environment mới:
+python -m venv .venv-new
+source .venv-new/bin/activate  # Linux/Mac
+.\.venv-new\Scripts\Activate.ps1  # Windows
+pip install -r requirements.txt
+
+# Cài PyTorch cho reranker (optional):
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+### 🎯 Tối ưu hiệu năng Production
+
+#### Tăng độ chính xác (Accuracy)
+```ini
+# Trong .env:
+HYBRID_ON=true                    # Bật hybrid search
+HYBRID_ALPHA=0.5                  # Cân bằng keyword + semantic
+RERANK_ON=true                    # Bật reranker (tăng latency)
+CONTEXT_K=6                       # Đủ context cho LLM
+MMR_LAMBDA=0.5                    # Đa dạng ngữ cảnh
+GENERATE_MIN_SIM=0.25             # Threshold cao hơn để tránh hallucination
+```
+
+#### Tăng tốc độ (Speed)
+```ini
+# Trong .env:
+RERANK_ON=false                   # Tắt reranker
+EMBED_CONCURRENCY=8               # Tăng parallel embedding
+CONTEXT_K=4                       # Giảm context
+RETRIEVE_TOP_K=8                  # Giảm candidates
+ENABLE_EMBED_CACHE=true           # Bật cache
+ENABLE_ANSWER_CACHE=true          # Bật answer cache
+```
+
+#### Tiết kiệm API quota
+```ini
+# Trong .env:
+ENABLE_EMBED_CACHE=true           # Cache embeddings (quan trọng!)
+ENABLE_ANSWER_CACHE=true          # Cache answers
+EMBED_SLEEP_MS=200                # Delay để tránh rate limit
+CHUNK_SIZE=400                    # Chunk lớn hơn = ít API calls
 ```
 
 ### Liên hệ hỗ trợ
