@@ -183,6 +183,15 @@ body {
   color: var(--primary-color);
 }
 
+#btn-new-session {
+  color: var(--primary-color);
+}
+
+#btn-new-session:hover {
+  background-color: rgba(37, 99, 235, 0.1);
+  color: var(--primary-hover);
+}
+
 /* File Uploader */
 .file-uploader {
   border: 2px dashed var(--border-color);

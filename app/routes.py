@@ -340,3 +340,60 @@ async def health():
 @router.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@router.get("/session/{session_id}")
+async def get_session_info(session_id: str):
+    """Lấy thông tin session để restore sau khi refresh trang"""
+    folder = os.path.join(UPLOAD_DIR, session_id)
+    manifest_path = os.path.join(folder, MANIFEST_NAME)
+
+    if not os.path.exists(manifest_path):
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Session không tồn tại", "session_found": False},
+        )
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        # Kiểm tra xem files còn tồn tại không
+        existing_files = []
+        for doc_info in manifest.get("docs", []):
+            file_path = os.path.join(folder, doc_info["doc"])
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                existing_files.append(
+                    {
+                        "name": doc_info["doc"],
+                        "orig_name": doc_info["doc"],
+                        "size": file_size,
+                        "pages": doc_info.get("pages", 0),
+                        "chunks": doc_info.get("chunks", 0),
+                        "status": "ingested",  # Đã được xử lý
+                    }
+                )
+
+        # Kiểm tra vector store có tồn tại không
+        has_vector_store = False
+        try:
+            store = get_store(session_id=session_id, dim=768)
+            has_vector_store = store.size() > 0
+        except Exception:
+            has_vector_store = False
+
+        return {
+            "session_found": True,
+            "session_id": session_id,
+            "files": existing_files,
+            "manifest": manifest,
+            "has_vector_store": has_vector_store,
+            "can_ask": has_vector_store and len(existing_files) > 0,
+        }
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Lỗi đọc session: {str(e)}", "session_found": False},
+        )

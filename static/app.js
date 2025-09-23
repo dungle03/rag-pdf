@@ -1,7 +1,10 @@
+console.log('RAG PDF JavaScript loaded!');
+
 document.addEventListener('DOMContentLoaded', () => {
   // --- DOM Elements ---
   const dom = {
     themeToggle: document.getElementById('theme-toggle'),
+    newSessionBtn: document.getElementById('btn-new-session'),
     fileInput: document.getElementById('file-input'),
     fileUploader: document.getElementById('file-uploader'),
     fileList: document.getElementById('file-list'),
@@ -30,6 +33,101 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const bsToast = new bootstrap.Toast(dom.toastElement);
 
+  // --- Session Management ---
+  const saveSessionToStorage = (sessionId) => {
+    if (sessionId) {
+      localStorage.setItem('rag_pdf_session_id', sessionId);
+      localStorage.setItem('rag_pdf_session_timestamp', Date.now().toString());
+    }
+  };
+
+  const getSessionFromStorage = () => {
+    const sessionId = localStorage.getItem('rag_pdf_session_id');
+    const timestamp = localStorage.getItem('rag_pdf_session_timestamp');
+
+    // Expire session after 24 hours
+    if (sessionId && timestamp) {
+      const age = Date.now() - parseInt(timestamp);
+      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+      if (age < maxAge) {
+        return sessionId;
+      } else {
+        // Clear expired session
+        localStorage.removeItem('rag_pdf_session_id');
+        localStorage.removeItem('rag_pdf_session_timestamp');
+      }
+    }
+    return null;
+  };
+
+  const clearSessionFromStorage = () => {
+    localStorage.removeItem('rag_pdf_session_id');
+    localStorage.removeItem('rag_pdf_session_timestamp');
+  };
+
+  // --- Restore Session ---
+  const restoreSession = async () => {
+    const savedSessionId = getSessionFromStorage();
+    if (!savedSessionId) return false;
+
+    try {
+      setStatus('Đang khôi phục phiên làm việc...', 'processing');
+
+      const response = await fetch(`/session/${savedSessionId}`);
+      const result = await response.json();
+
+      if (response.ok && result.session_found) {
+        state.sessionId = savedSessionId;
+
+        // Restore files
+        state.files = result.files.map(file => ({
+          file: null, // Không có File object, chỉ có metadata
+          id: `file-${Date.now()}-${Math.random()}`,
+          status: file.status,
+          serverDocName: file.name,
+          size: file.size,
+          pages: file.pages,
+          chunks: file.chunks,
+          name: file.orig_name || file.name
+        }));
+
+        renderFileList();
+
+        // Update UI based on session state
+        if (result.can_ask) {
+          dom.askButton.disabled = false;
+          dom.queryInput.disabled = false;
+          dom.queryInput.placeholder = "Bây giờ, hãy hỏi tôi điều gì đó...";
+
+          // Update document title
+          const docNames = result.files.map(f => f.name).join(', ');
+          if (docNames) {
+            dom.docTitle.textContent = docNames;
+          }
+
+          // Keep welcome screen visible - removed auto-hide logic
+        }
+
+        showToast(`Đã khôi phục phiên làm việc với ${result.files.length} tài liệu.`, 'success');
+        setStatus('Đã khôi phục phiên làm việc', 'ready');
+        return true;
+
+      } else {
+        // Session not found or invalid
+        clearSessionFromStorage();
+        setStatus('Sẵn sàng', 'ready');
+        return false;
+      }
+
+    } catch (error) {
+      console.error('Error restoring session:', error);
+      clearSessionFromStorage();
+      setStatus('Sẵn sàng', 'ready');
+      return false;
+    }
+  };
+
   // --- Utility Functions ---
   const showToast = (message, type = 'info') => {
     dom.toastElement.querySelector('.toast-body').textContent = message;
@@ -51,6 +149,51 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.statusIndicator.className = `status-indicator-${type}`;
   };
 
+  // --- New Session ---
+  const startNewSession = () => {
+    if (confirm('Bạn có chắc muốn bắt đầu phiên làm việc mới? Điều này sẽ xóa tất cả tài liệu và cuộc hội thoại hiện tại.')) {
+      // Clear session storage
+      clearSessionFromStorage();
+
+      // Reset state
+      state.files = [];
+      state.sessionId = null;
+      state.isIngesting = false;
+      state.isAsking = false;
+
+      // Reset UI
+      renderFileList();
+      dom.askButton.disabled = true;
+      dom.queryInput.disabled = true;
+      dom.queryInput.placeholder = "Hỏi điều gì đó về tài liệu của bạn...";
+      dom.docTitle.textContent = '';
+      dom.ingestButton.innerHTML = '<i class="bi bi-gear"></i> Xử lý & Vector hóa';
+      dom.ingestButton.disabled = true;
+
+      // Clear chat
+      dom.chatContainer.innerHTML = `
+        <div id="welcome-screen" class="welcome-screen">
+          <div class="welcome-icon">🤖</div>
+          <h3>Trợ lý tài liệu RAG xin chào!</h3>
+          <p>Hãy bắt đầu bằng cách tải lên tài liệu PDF của bạn ở thanh bên trái.</p>
+          <div class="onboarding-steps">
+            <div class="step"><span>1</span> Tải lên PDF</div>
+            <div class="step"><span>2</span> Đặt câu hỏi</div>
+            <div class="step"><span>3</span> Nhận câu trả lời & trích dẫn</div>
+          </div>
+        </div>
+      `;
+      dom.welcomeScreen = document.getElementById('welcome-screen');
+
+      // Clear knowledge sidebar
+      dom.knowledgePlaceholder.style.display = 'block';
+      dom.knowledgeContent.style.display = 'none';
+
+      setStatus('Sẵn sàng');
+      showToast('Đã bắt đầu phiên làm việc mới.', 'success');
+    }
+  };
+
   // --- Theme Management ---
   const applyTheme = (theme) => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -63,6 +206,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     applyTheme(newTheme);
   });
+
+  dom.newSessionBtn.addEventListener('click', startNewSession);
 
   // --- File Handling ---
   const renderFileList = () => {
@@ -78,11 +223,17 @@ document.addEventListener('DOMContentLoaded', () => {
       fileItem.dataset.id = fileWrapper.id;
 
       let statusIcon = '';
+      let fileName = fileWrapper.name || (fileWrapper.file && fileWrapper.file.name) || 'Unknown file';
+      let fileSize = fileWrapper.size || (fileWrapper.file && fileWrapper.file.size) || 0;
+
       switch (fileWrapper.status) {
         case 'uploading':
           statusIcon = `<div class="spinner-border spinner-border-sm text-primary" role="status"></div>`;
           break;
         case 'uploaded':
+          statusIcon = `<i class="bi bi-check-circle-fill text-success"></i>`;
+          break;
+        case 'ingested':
           statusIcon = `<i class="bi bi-check-circle-fill text-success"></i>`;
           break;
         case 'error':
@@ -92,12 +243,18 @@ document.addEventListener('DOMContentLoaded', () => {
           statusIcon = `<i class="bi bi-file-earmark-arrow-up"></i>`;
       }
 
+      // Show additional info for ingested files
+      let additionalInfo = '';
+      if (fileWrapper.status === 'ingested' && fileWrapper.pages && fileWrapper.chunks) {
+        additionalInfo = ` • ${fileWrapper.pages} trang • ${fileWrapper.chunks} chunks`;
+      }
+
       fileItem.innerHTML = `
         <div class="file-info">
           <div class="file-icon"><i class="bi bi-file-earmark-pdf-fill"></i></div>
           <div class="file-details">
-            <div class="file-name" title="${fileWrapper.file.name}">${fileWrapper.file.name}</div>
-            <div class="file-status">${formatBytes(fileWrapper.file.size)}</div>
+            <div class="file-name" title="${fileName}">${fileName}</div>
+            <div class="file-status">${formatBytes(fileSize)}${additionalInfo}</div>
           </div>
         </div>
         <div class="file-actions">
@@ -110,7 +267,19 @@ document.addEventListener('DOMContentLoaded', () => {
       dom.fileList.appendChild(fileItem);
     });
 
-    dom.ingestButton.disabled = state.files.every(f => f.status !== 'uploaded');
+    // Enable ingest button only if there are uploaded files that haven't been ingested
+    const hasUploadedFiles = state.files.some(f => f.status === 'uploaded');
+    const hasIngestedFiles = state.files.some(f => f.status === 'ingested');
+
+    dom.ingestButton.disabled = !hasUploadedFiles;
+
+    // If all files are ingested, change button text
+    if (hasIngestedFiles && !hasUploadedFiles) {
+      dom.ingestButton.textContent = '✓ Đã xử lý';
+      dom.ingestButton.disabled = true;
+    } else {
+      dom.ingestButton.innerHTML = '<i class="bi bi-gear"></i> Xử lý & Vector hóa';
+    }
   };
 
   const handleFiles = (files) => {
@@ -144,6 +313,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(result.error || 'Upload failed');
 
       state.sessionId = result.session_id;
+      saveSessionToStorage(state.sessionId); // Save session to localStorage
+
       let successfulUploads = 0;
       result.files.forEach(uploadedFile => {
         const serverName = uploadedFile.orig_name || uploadedFile.name;
@@ -162,6 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (successfulUploads > 0) {
         showToast(`Đã tải lên thành công ${successfulUploads} file.`, 'success');
+        // Removed duplicate saveSessionToStorage call
       }
 
     } catch (error) {
@@ -215,12 +387,27 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(result.error || 'Ingest failed');
 
       showToast(`Đã xử lý thành công ${result.total_chunks} chunks từ ${result.ingested.length} tài liệu.`, 'success');
+
+      // Update file status to 'ingested'
+      result.ingested.forEach(ingested => {
+        const fileWrapper = state.files.find(fw => fw.serverDocName === ingested.doc);
+        if (fileWrapper) {
+          fileWrapper.status = 'ingested';
+          fileWrapper.pages = ingested.pages;
+          fileWrapper.chunks = ingested.chunks;
+        }
+      });
+
+      renderFileList(); // Re-render to show updated status
+
       dom.askButton.disabled = false;
       dom.queryInput.disabled = false;
       dom.queryInput.placeholder = "Bây giờ, hãy hỏi tôi điều gì đó...";
       if (result.ingested.length > 0) {
         dom.docTitle.textContent = result.ingested.map(d => d.doc).join(', ');
       }
+
+      saveSessionToStorage(state.sessionId); // Update session timestamp
 
     } catch (error) {
       showToast(`Lỗi xử lý: ${error.message}`, 'error');
@@ -319,12 +506,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Initialization ---
-  const init = () => {
+  const init = async () => {
     const preferredTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     applyTheme(preferredTheme);
     dom.queryInput.disabled = true;
-    renderFileList();
-    setStatus('Sẵn sàng');
+
+    // Try to restore previous session
+    const sessionRestored = await restoreSession();
+
+    if (!sessionRestored) {
+      renderFileList();
+      setStatus('Sẵn sàng');
+    }
   };
 
   init();
