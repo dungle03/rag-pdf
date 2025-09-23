@@ -24,58 +24,58 @@ Hệ thống đặc biệt phù hợp cho việc học tập, nghiên cứu, và
 
 ```mermaid
 flowchart LR
-    U[👤 Người dùng] -- "Upload PDF" --> S[🚀 FastAPI: /upload]
-    S --> L["📄 PDF Loader<br/>pypdfium2/pymupdf + OCR"]
+    U["👤 Người dùng"] -- "Upload PDF" --> S["🚀 FastAPI /upload"]
+    S --> L["📄 PDF Loader<br/>pypdfium2 + OCR"]
     L --> C["✂️ Chunking<br/>300-500 tokens<br/>10-15% overlap"]
-    C --> E["🧠 Embeddings<br/>Gemini text-embedding-004"]
-    E --> V["💾 Vector Store<br/>FAISS / Chroma + MMR"]
+    C --> E["🧠 Embeddings<br/>Gemini API"]
+    E --> V["💾 Vector Store<br/>FAISS + MMR"]
     
-    U -- "❓ Query" --> Q[🔍 FastAPI: /ask]
-    Q --> R1["🔎 Hybrid Retrieve<br/>BM25 + Vector + MMR"]
-    R1 --> R2["🎯 Rerank<br/>bge-reranker-base (optional)"]
-    R2 --> G["✨ Gemini 1.5 Flash<br/>RAG prompt tiếng Việt"]
+    U -- "❓ Query" --> Q["🔍 FastAPI /ask"]
+    Q --> R1["🔎 Hybrid Retrieve<br/>BM25 + Vector"]
+    R1 --> R2["🎯 Rerank<br/>BGE CrossEncoder"]
+    R2 --> G["✨ Gemini 1.5 Flash<br/>RAG prompts"]
     G --> A["📋 Answer + Citations<br/>[doc:page] format"]
     A --> U
     
-    E -.-> EC[💰 Embed Cache<br/>SHA1-based SQLite]
-    G -.-> AC[💾 Answer Cache<br/>Query + DocSet]
-    S -.-> FS[📁 File Storage<br/>Session-based uploads]
+    E -.-> EC["💰 Embed Cache<br/>SQLite"]
+    G -.-> AC["💾 Answer Cache<br/>Query cache"]
+    S -.-> FS["📁 File Storage<br/>Session-based"]
 ```
 
 ### Kiến trúc tổng thể hệ thống
 
 ```mermaid
 graph TB
-    subgraph "🌐 Frontend Layer"
-        UI[Web Interface<br/>Bootstrap 5 + Vanilla JS<br/>Responsive Design]
+    subgraph Frontend["🌐 Frontend Layer"]
+        UI["Web Interface<br/>Bootstrap 5 + JS"]
     end
     
-    subgraph "🔌 API Gateway"
-        API[FastAPI Application<br/>ASGI + Uvicorn<br/>CORS + Middleware]
-        ROUTES[Routes Controller<br/>/, /upload, /ingest<br/>/ask, /docs, /healthz]
+    subgraph Gateway["🔌 API Gateway"]
+        API["FastAPI Application<br/>ASGI + Uvicorn"]
+        ROUTES["Routes Controller<br/>upload, ingest, ask"]
     end
     
-    subgraph "🧠 RAG Processing Engine"
-        LOADER[📄 Document Loader<br/>pypdfium2 + Tesseract OCR<br/>Header/Footer Detection]
-        CHUNK[✂️ Smart Chunking<br/>tiktoken-based<br/>Token-aware splitting]
-        EMBED[🔗 Embedding Engine<br/>Gemini API + ThreadPool<br/>Concurrent Processing]
-        VECTOR[💾 Vector Database<br/>FAISS IndexFlatIP<br/>Cosine Similarity]
-        SEARCH[🔍 Hybrid Retrieval<br/>BM25 (sparse) + Vector (dense)<br/>MMR Diversity]
-        RERANK[🎯 Cross-Encoder<br/>BGE-reranker-base<br/>Precision Boost]
-        GEN[✨ LLM Generator<br/>Gemini 1.5 Flash<br/>Citation-aware Prompts]
+    subgraph RAGEngine["🧠 RAG Processing Engine"]
+        LOADER["📄 Document Loader<br/>pypdfium2 + OCR"]
+        CHUNK["✂️ Smart Chunking<br/>tiktoken-based"]
+        EMBED["🔗 Embedding Engine<br/>Gemini API + ThreadPool"]
+        VECTOR["💾 Vector Database<br/>FAISS IndexFlatIP"]
+        SEARCH["🔍 Hybrid Retrieval<br/>BM25 + Vector + MMR"]
+        RERANK["🎯 Cross-Encoder<br/>BGE reranker"]
+        GEN["✨ LLM Generator<br/>Gemini 1.5 Flash"]
     end
     
-    subgraph "💾 Storage & Cache Layer"
-        FILES[📁 File System<br/>Session-based Storage<br/>/uploads/{session_id}/]
-        ECACHE[⚡ Embedding Cache<br/>SQLite + SHA1 Keys<br/>90% API Call Reduction]
-        ACACHE[🗃️ Answer Cache<br/>SQLite + Query Hashing<br/>Instant Responses]
-        LOGS[📊 Structured Logs<br/>JSON Format<br/>Performance Metrics]
+    subgraph Storage["💾 Storage & Cache"]
+        FILES["📁 File System<br/>Session-based"]
+        ECACHE["⚡ Embedding Cache<br/>SQLite + SHA1"]
+        ACACHE["🗃️ Answer Cache<br/>Query + DocSet"]
+        LOGS["📊 Structured Logs<br/>JSON Format"]
     end
     
-    subgraph "🛡️ Security & Monitoring"
-        VALID[✅ Input Validation<br/>MIME + File Size<br/>PDF Signature Check]
-        RATE[⏱️ Rate Limiting<br/>Per-IP + Per-Endpoint<br/>DDoS Protection]
-        ERROR[🚨 Error Handling<br/>Comprehensive Exceptions<br/>User-friendly Messages]
+    subgraph Security["🛡️ Security & Monitoring"]
+        VALID["✅ Input Validation<br/>MIME + Size check"]
+        RATE["⏱️ Rate Limiting<br/>Per-IP protection"]
+        ERROR["🚨 Error Handling<br/>Exception management"]
     end
     
     UI --> API
