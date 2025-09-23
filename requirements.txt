@@ -23,3 +23,7 @@ huggingface_hub
 transformers
 
 sentence-transformers
+
+# Additional dependencies cho improvements
+regex
+tiktoken

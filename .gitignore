@@ -19,3 +19,6 @@ Thumbs.db
 # Tệp IDE
 .vscode/
 .idea/
+
+# init.py
+__init__.py

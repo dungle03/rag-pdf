@@ -3,8 +3,11 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict
 import numpy as np
 import faiss
+import os
+import json
 
 from app.utils.schema import Chunk
+
 
 @dataclass
 class VSItem:
@@ -12,23 +15,83 @@ class VSItem:
     meta: Dict
     text: str
 
+
 class FAISSStore:
-    def __init__(self, dim: int):
+    def __init__(self, db_path: str, dim: int):
+        self.db_path = db_path
         # dùng inner product (đã chuẩn hoá = cosine)
         self.index = faiss.IndexFlatIP(dim)
         self.items: List[VSItem] = []
         self.docs_set = set()
 
+        if os.path.exists(db_path):
+            print(f"Tải index từ {db_path}")
+            self.index = faiss.read_index(db_path)
+            # cố gắng tải metadata items nếu có
+            self._try_load_items_from_disk()
+
+    def _items_file_path(self) -> str:
+        folder = os.path.dirname(self.db_path)
+        return os.path.join(folder, "items.jsonl")
+
+    def _try_load_items_from_disk(self):
+        items_path = self._items_file_path()
+        if not os.path.exists(items_path):
+            return
+        try:
+            loaded = []
+            with open(items_path, "r", encoding="utf-8") as f:
+                for i, line in enumerate(f):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = json.loads(line)
+                    vec = None
+                    try:
+                        vec = self.index.reconstruct(i)
+                    except Exception:
+                        # nếu không reconstruct được (lệch số lượng), bỏ qua
+                        break
+                    loaded.append(
+                        VSItem(
+                            vec=np.array(vec, dtype=np.float32),
+                            meta=rec.get("meta", {}),
+                            text=rec.get("text", ""),
+                        )
+                    )
+            if loaded:
+                self.items = loaded
+                self.docs_set = {
+                    it.meta.get("doc") for it in self.items if it.meta.get("doc")
+                }
+                print(f"Tải metadata {len(self.items)} items từ {items_path}")
+        except Exception as e:
+            print(f"Lỗi tải items metadata: {e}")
+
     @property
     def dim(self) -> int:
         return self.index.d
-    
+
     def size(self) -> int:
         return int(self.index.ntotal)
 
     def add(self, vectors: np.ndarray, chunks: List[Chunk]):
         assert vectors.shape[0] == len(chunks)
+        # guard: rebuild index if empty and dim mismatches
+        if vectors.shape[1] != self.index.d:
+            if self.index.ntotal == 0:
+                print(
+                    f"Dim mismatch: rebuilding index {self.index.d} -> {vectors.shape[1]}"
+                )
+                self.index = faiss.IndexFlatIP(int(vectors.shape[1]))
+            else:
+                raise ValueError(
+                    f"Embedding dim {vectors.shape[1]} != index dim {self.index.d}. Cannot add to non-empty index."
+                )
         self.index.add(vectors)
+        faiss.write_index(self.index, self.db_path)  # Lưu index sau khi thêm
+        print(f"Đã lưu index vào {self.db_path}")
+
         for i, c in enumerate(chunks):
             self.items.append(
                 VSItem(
@@ -39,7 +102,20 @@ class FAISSStore:
             )
             self.docs_set.add(c.doc_name)
 
-    def _mmr(self, query_vec: np.ndarray, cand_ix: np.ndarray, k: int, lambda_: float = 0.5) -> List[int]:
+        # persist items metadata to disk for future runs
+        items_path = self._items_file_path()
+        try:
+            with open(items_path, "w", encoding="utf-8") as w:
+                for it in self.items:
+                    rec = {"meta": it.meta, "text": it.text}
+                    w.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            print(f"Đã lưu metadata items vào {items_path}")
+        except Exception as e:
+            print(f"Lỗi lưu items metadata: {e}")
+
+    def _mmr(
+        self, query_vec: np.ndarray, cand_ix: np.ndarray, k: int, lambda_: float = 0.5
+    ) -> List[int]:
         """Maximal Marginal Relevance để đa dạng hoá kết quả."""
         chosen: List[int] = []
         cand = list(cand_ix)
@@ -63,10 +139,26 @@ class FAISSStore:
             cand.remove(best_i)
         return chosen
 
-    def search(self, query_vec: np.ndarray, top_k: int = 8, mmr_lambda: float = 0.5) -> List[Chunk]:
+    def search(
+        self, query_vec: np.ndarray, top_k: int = 8, mmr_lambda: float = 0.5
+    ) -> List[Chunk]:
         if self.index.ntotal == 0:
             return []
-        D, I = self.index.search(query_vec.reshape(1, -1).astype("float32"), max(top_k * 3, top_k))
+        if query_vec.shape[0] != self.index.d:
+            print(
+                f"Bỏ qua search: query dim {query_vec.shape[0]} != index dim {self.index.d}"
+            )
+            return []
+        # đảm bảo có items metadata; nếu thiếu, thử tải từ disk
+        if not self.items or len(self.items) < int(self.index.ntotal):
+            self._try_load_items_from_disk()
+            if not self.items or len(self.items) < int(self.index.ntotal):
+                # không đủ metadata → trả rỗng để tránh lỗi
+                print("Thiếu metadata items so với index; bỏ qua kết quả để tránh lỗi.")
+                return []
+        D, I = self.index.search(
+            query_vec.reshape(1, -1).astype("float32"), max(top_k * 3, top_k)
+        )
         cand_ix = [int(i) for i in I[0] if i >= 0]
         if not cand_ix:
             return []
@@ -96,13 +188,21 @@ class FAISSStore:
         self.items.clear()
         self.docs_set = set()
 
-# Singleton store (khởi tạo lazy sau khi biết dim)
-_store: FAISSStore | None = None
 
-def get_store(dim: int | None = None) -> FAISSStore:
-    global _store
-    if _store is None:
-        if dim is None:
-            raise RuntimeError("Vector store chưa khởi tạo. Hãy gọi get_store(dim) lần đầu.")
-        _store = FAISSStore(dim=dim)
-    return _store
+# Singleton store (khởi tạo lazy sau khi biết dim)
+_stores: Dict[str, FAISSStore] = {}
+UPLOAD_DIR = "./uploads"
+
+
+def get_store(session_id: str, dim: int = 768) -> FAISSStore:
+    """Lấy/tạo vector store cho session cụ thể."""
+    if session_id in _stores:
+        return _stores[session_id]
+
+    # Nếu chưa có trong cache, tạo mới từ file hoặc tạo rỗng
+    folder = os.path.join(UPLOAD_DIR, session_id)
+    db_path = os.path.join(folder, "faiss_index.bin")
+
+    store = FAISSStore(db_path=db_path, dim=dim)
+    _stores[session_id] = store
+    return store

@@ -1,45 +1,101 @@
-import os, json, time, requests, re, unicodedata
+#!/usr/bin/env python3
+"""
+Simple evaluation script for RAG PDF
+"""
 
-URL = os.getenv("APP_URL", "http://127.0.0.1:8000/ask")
+import os
+import sys
+import json
+import time
+import uuid
+import requests
+from pathlib import Path
 
-def normalize(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if unicodedata.category(ch)[0] != "M")  # bỏ dấu
-    s = re.sub(r"\s+", " ", s).strip().lower()
-    return s
 
-with open("tests/eval_cases.json", encoding="utf-8") as f:
-    cases = json.load(f)
+def run_evaluation():
+    """Run simple evaluation"""
 
-results = []
-for case in cases:
-    q = case["q"]
-    t0 = time.time()
-    r = requests.post(URL, data={"query": q}, timeout=120)
-    elapsed = (time.time()-t0)*1000
-    if r.status_code != 200:
-        print(f"[HTTP {r.status_code}] {r.text}")
-        continue
-    data = r.json()
-    answer = data.get("answer","")
-    ans_n = normalize(answer)
+    BASE_URL = "http://127.0.0.1:8000"
+    session_id = os.getenv("TEST_SESSION_ID", f"test-{uuid.uuid4().hex[:8]}")
 
-    # --- chấm điểm ---
-    groups = case.get("expect_groups") or []
-    ok = True
-    for g in groups:
-        g_match = any(normalize(kw) in ans_n for kw in g)
-        if not g_match:
-            ok = False
-            break
+    print(f"Starting evaluation with session: {session_id}")
 
-    results.append({"q": q, "answer": answer, "latency": elapsed, "ok": ok})
+    # Load test cases
+    cases_file = Path("tests/eval_cases.json")
+    with open(cases_file, "r", encoding="utf-8") as f:
+        cases = json.load(f)
 
-if results:
-    acc = sum(1 for r in results if r["ok"])/len(results)
-    print(f"\n=== Evaluation Report ===\nAccuracy: {acc*100:.1f}%")
-    print(f"Avg latency: {sum(r['latency'] for r in results)/len(results):.1f} ms")
-    for r in results:
-        print(f"- Q: {r['q']} | OK={r['ok']} | {r['latency']:.1f} ms\n  Ans: {r['answer'][:120]}...")
-else:
-    print("Không có test nào thành công (HTTP != 200).")
+    results = []
+    passed = 0
+
+    for i, case in enumerate(cases, 1):
+        query = case["q"]
+        expected = case["expected"]
+
+        print(f"[{i}/{len(cases)}] Testing: {query[:50]}...")
+
+        try:
+            data = {"query": query, "session_id": session_id}
+            start = time.time()
+            response = requests.post(f"{BASE_URL}/ask", data=data, timeout=60)
+            elapsed = (time.time() - start) * 1000
+
+            if response.status_code == 200:
+                result = response.json()
+                answer = result.get("answer", "").lower()
+                confidence = result.get("confidence", 0)
+
+                # Simple keyword matching
+                found = any(kw.lower() in answer for kw in expected)
+
+                if found:
+                    print(f"✅ PASS | {elapsed:.1f}ms | Confidence: {confidence:.3f}")
+                    passed += 1
+                    status = "PASS"
+                else:
+                    print(f"❌ FAIL | {elapsed:.1f}ms | No expected keywords found")
+                    status = "FAIL"
+
+                results.append(
+                    {
+                        "query": query,
+                        "answer": answer,
+                        "confidence": confidence,
+                        "latency_ms": elapsed,
+                        "status": status,
+                        "expected": expected,
+                    }
+                )
+            else:
+                print(f"❌ API Error: {response.status_code}")
+
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
+    # Report
+    accuracy = (passed / len(cases)) * 100
+    avg_latency = sum(r["latency_ms"] for r in results) / len(results) if results else 0
+
+    print(f"\n=== EVALUATION REPORT ===")
+    print(f"Session: {session_id}")
+    print(f"Accuracy: {accuracy:.1f}% ({passed}/{len(cases)})")
+    print(f"Avg Latency: {avg_latency:.1f}ms")
+
+    if accuracy >= 60:
+        print("🎉 EVALUATION PASS")
+    else:
+        print("❌ EVALUATION FAIL")
+
+    return {
+        "session_id": session_id,
+        "accuracy": accuracy,
+        "passed": passed,
+        "total": len(cases),
+        "avg_latency_ms": avg_latency,
+        "results": results,
+    }
+
+
+if __name__ == "__main__":
+    eval_data = run_evaluation()
+    sys.exit(0 if eval_data["accuracy"] >= 60 else 1)
