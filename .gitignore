@@ -22,3 +22,6 @@ Thumbs.db
 
 # init.py
 __init__.py
+
+# old files
+old_*.
