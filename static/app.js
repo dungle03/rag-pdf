@@ -1,10 +1,10 @@
 console.log('RAG PDF JavaScript loaded!');
 
 document.addEventListener('DOMContentLoaded', () => {
-  // --- DOM Elements ---
   const dom = {
     themeToggle: document.getElementById('theme-toggle'),
     newSessionBtn: document.getElementById('btn-new-session'),
+    chatList: document.getElementById('chat-list'),
     fileInput: document.getElementById('file-input'),
     fileUploader: document.getElementById('file-uploader'),
     fileList: document.getElementById('file-list'),
@@ -13,8 +13,10 @@ document.addEventListener('DOMContentLoaded', () => {
     queryInput: document.getElementById('query-input'),
     askButton: document.getElementById('btn-ask'),
     chatContainer: document.getElementById('chat-container'),
-    welcomeScreen: document.getElementById('welcome-screen'),
     docTitle: document.getElementById('doc-title'),
+    sessionIdBadge: document.getElementById('session-id-badge'),
+    sessionDocCount: document.getElementById('session-doc-count'),
+    sessionChatCount: document.getElementById('session-chat-count'),
     knowledgeContent: document.getElementById('knowledge-content'),
     knowledgePlaceholder: document.getElementById('knowledge-placeholder'),
     citationsList: document.getElementById('citations-list'),
@@ -23,42 +25,59 @@ document.addEventListener('DOMContentLoaded', () => {
     toastElement: document.getElementById('notification-toast'),
   };
 
-  // --- State ---
-  let state = {
-    files: [], // { file: File, id: string, status: 'pending'|'uploading'|'uploaded'|'error' }
+  const bsToast = new bootstrap.Toast(dom.toastElement);
+
+  const WELCOME_HTML = `
+        <div class="welcome-screen">
+          <div class="welcome-icon">🤖</div>
+          <h3>Trợ lý tài liệu RAG xin chào!</h3>
+          <p>Hãy bắt đầu bằng cách tải lên tài liệu PDF của bạn ở thanh bên trái.</p>
+          <div class="onboarding-steps">
+            <div class="step"><span>1</span> Tải lên PDF</div>
+            <div class="step"><span>2</span> Đặt câu hỏi</div>
+            <div class="step"><span>3</span> Nhận câu trả lời &amp; trích dẫn</div>
+          </div>
+        </div>
+      `;
+
+  const createEmptyState = () => ({
+    files: [],
     sessionId: null,
     isIngesting: false,
     isAsking: false,
+    chats: {},
+    activeChatId: null,
+    sessions: [],
+  });
+
+  const generateSessionId = () => {
+    if (window.crypto?.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+    return `session-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
   };
 
-  const bsToast = new bootstrap.Toast(dom.toastElement);
+  const sanitizeFilename = (name) => (name ? name.replace(/[^a-zA-Z0-9_.-]+/g, '_') : '');
 
-  // --- Session Management ---
+  let state = createEmptyState();
+
+  const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
   const saveSessionToStorage = (sessionId) => {
-    if (sessionId) {
-      localStorage.setItem('rag_pdf_session_id', sessionId);
-      localStorage.setItem('rag_pdf_session_timestamp', Date.now().toString());
-    }
+    if (!sessionId) return;
+    localStorage.setItem('rag_pdf_session_id', sessionId);
+    localStorage.setItem('rag_pdf_session_timestamp', Date.now().toString());
   };
 
   const getSessionFromStorage = () => {
     const sessionId = localStorage.getItem('rag_pdf_session_id');
     const timestamp = localStorage.getItem('rag_pdf_session_timestamp');
-
-    // Expire session after 24 hours
-    if (sessionId && timestamp) {
-      const age = Date.now() - parseInt(timestamp);
-      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-
-      if (age < maxAge) {
-        return sessionId;
-      } else {
-        // Clear expired session
-        localStorage.removeItem('rag_pdf_session_id');
-        localStorage.removeItem('rag_pdf_session_timestamp');
-      }
+    if (!sessionId || !timestamp) return null;
+    if (Date.now() - parseInt(timestamp, 10) > SESSION_TTL_MS) {
+      clearSessionFromStorage();
+      return null;
     }
-    return null;
+    return sessionId;
   };
 
   const clearSessionFromStorage = () => {
@@ -66,72 +85,238 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.removeItem('rag_pdf_session_timestamp');
   };
 
-  // --- Restore Session ---
-  const restoreSession = async () => {
-    const savedSessionId = getSessionFromStorage();
-    if (!savedSessionId) return false;
-
-    try {
-      setStatus('Đang khôi phục phiên làm việc...', 'processing');
-
-      const response = await fetch(`/session/${savedSessionId}`);
-      const result = await response.json();
-
-      if (response.ok && result.session_found) {
-        state.sessionId = savedSessionId;
-
-        // Restore files
-        state.files = result.files.map(file => ({
-          file: null, // Không có File object, chỉ có metadata
-          id: `file-${Date.now()}-${Math.random()}`,
-          status: file.status,
-          serverDocName: file.name,
-          size: file.size,
-          pages: file.pages,
-          chunks: file.chunks,
-          name: file.orig_name || file.name
-        }));
-
-        renderFileList();
-
-        // Update UI based on session state
-        if (result.can_ask) {
-          dom.askButton.disabled = false;
-          dom.queryInput.disabled = false;
-          dom.queryInput.placeholder = "Bây giờ, hãy hỏi tôi điều gì đó...";
-
-          // Update document title
-          const docNames = result.files.map(f => f.name).join(', ');
-          if (docNames) {
-            dom.docTitle.textContent = docNames;
-          }
-
-          // Keep welcome screen visible - removed auto-hide logic
-        }
-
-        showToast(`Đã khôi phục phiên làm việc với ${result.files.length} tài liệu.`, 'success');
-        setStatus('Đã khôi phục phiên làm việc', 'ready');
-        return true;
-
+  const updateSessionMeta = () => {
+    if (dom.sessionIdBadge) {
+      if (state.sessionId) {
+        dom.sessionIdBadge.textContent = `#${state.sessionId.slice(0, 8)}`;
+        dom.sessionIdBadge.classList.remove('session-id-empty');
       } else {
-        // Session not found or invalid
-        clearSessionFromStorage();
-        setStatus('Sẵn sàng', 'ready');
-        return false;
+        dom.sessionIdBadge.textContent = 'Chưa bắt đầu';
+        dom.sessionIdBadge.classList.add('session-id-empty');
       }
+    }
 
-    } catch (error) {
-      console.error('Error restoring session:', error);
-      clearSessionFromStorage();
-      setStatus('Sẵn sàng', 'ready');
-      return false;
+    if (dom.sessionDocCount) {
+      const uploadedCount = state.files.filter((file) => ['uploaded', 'ingested'].includes(file.status)).length;
+      const ingestedCount = state.files.filter((file) => file.status === 'ingested').length;
+      let docLabel = '0 tài liệu';
+      if (ingestedCount > 0) {
+        docLabel = `${ingestedCount} tài liệu đã xử lý`;
+      } else if (uploadedCount > 0) {
+        docLabel = `${uploadedCount} tài liệu đã tải lên`;
+      }
+      dom.sessionDocCount.textContent = docLabel;
+    }
+
+    if (dom.sessionChatCount) {
+      const chatCount = state.sessions.length;
+      let chatLabel = '0 cuộc trò chuyện';
+      if (chatCount === 1) {
+        chatLabel = '1 cuộc trò chuyện';
+      } else if (chatCount > 1) {
+        chatLabel = `${chatCount} cuộc trò chuyện`;
+      }
+      dom.sessionChatCount.textContent = chatLabel;
     }
   };
 
-  // --- Utility Functions ---
+  const upsertSessionSummary = (summary) => {
+    if (!summary || !summary.session_id) return;
+    const existingIndex = state.sessions.findIndex((s) => s.session_id === summary.session_id);
+    const existing = existingIndex >= 0 ? state.sessions[existingIndex] : {};
+    const hasDocsField = Object.prototype.hasOwnProperty.call(summary, 'docs');
+    const mergedDocs = (() => {
+      if (hasDocsField) return summary.docs || [];
+      if (existing && existing.docs) return existing.docs;
+      return [];
+    })();
+    const docCountValue = (() => {
+      if (Object.prototype.hasOwnProperty.call(summary, 'doc_count')) {
+        return summary.doc_count ?? (hasDocsField ? (summary.docs || []).length : mergedDocs.length);
+      }
+      if (hasDocsField) {
+        return (summary.docs || []).length;
+      }
+      if (existing && Object.prototype.hasOwnProperty.call(existing, 'doc_count')) {
+        return existing.doc_count ?? (existing.docs ? existing.docs.length : 0);
+      }
+      return mergedDocs.length;
+    })();
+    const normalized = {
+      session_id: summary.session_id,
+      title: summary.title ?? existing.title ?? 'Cuộc trò chuyện',
+      created_at: summary.created_at ?? existing.created_at ?? null,
+      updated_at: summary.updated_at ?? existing.updated_at ?? null,
+      message_count: summary.message_count ?? existing.message_count ?? 0,
+      chat_id: summary.chat_id ?? existing.chat_id ?? null,
+      doc_count: docCountValue,
+      docs: mergedDocs,
+    };
+    if (existingIndex >= 0) {
+      state.sessions[existingIndex] = {
+        ...state.sessions[existingIndex],
+        ...normalized,
+      };
+    } else {
+      state.sessions.push(normalized);
+    }
+    state.sessions.sort((a, b) => {
+      const aUpdated = a.updated_at || 0;
+      const bUpdated = b.updated_at || 0;
+      return bUpdated - aUpdated;
+    });
+    updateSessionMeta();
+  };
+
+  const removeSessionSummary = (sessionId) => {
+    if (!sessionId) return;
+    state.sessions = state.sessions.filter((session) => session.session_id !== sessionId);
+    updateSessionMeta();
+  };
+
+  const loadSessionsFromServer = async () => {
+    try {
+      const response = await fetch('/sessions');
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Không thể tải danh sách phiên làm việc');
+      }
+      state.sessions = (result.sessions || []).map((summary) => ({
+        session_id: summary.session_id,
+        title: summary.title || 'Cuộc trò chuyện',
+        created_at: summary.created_at || null,
+        updated_at: summary.updated_at || null,
+        message_count: summary.message_count ?? 0,
+        chat_id: summary.chat_id || null,
+        doc_count: summary.doc_count ?? 0,
+        docs: summary.docs || [],
+      }));
+      state.sessions.sort((a, b) => {
+        const aUpdated = a.updated_at || 0;
+        const bUpdated = b.updated_at || 0;
+        return bUpdated - aUpdated;
+      });
+      updateSessionMeta();
+      renderChatList();
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      showToast(error.message, 'error');
+    }
+  };
+
+  const mapServerFilesToState = (files = []) => files.map((file) => ({
+    file: null,
+    id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `file-${Date.now()}-${Math.random()}`,
+    status: file.status || 'ingested',
+    serverDocName: file.name,
+    size: file.size,
+    pages: file.pages,
+    chunks: file.chunks,
+    name: file.orig_name || file.name,
+    error: null,
+  }));
+
+  const setActiveSession = async (sessionId, { forceReload = false } = {}) => {
+    if (!sessionId) return;
+    const alreadyActive = state.sessionId === sessionId;
+    state.sessionId = sessionId;
+    saveSessionToStorage(sessionId);
+    updateSessionMeta();
+
+    if (alreadyActive && !forceReload) {
+      renderChatList();
+      return;
+    }
+
+    setStatus('Đang tải phiên làm việc...', 'processing');
+    try {
+      const response = await fetch(`/session/${sessionId}`);
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Không thể tải thông tin phiên làm việc');
+      }
+
+      state.files = mapServerFilesToState(result.files || []);
+      renderFileList();
+
+      const docNames = (result.files || []).map((f) => f.name).join(', ');
+      dom.docTitle.textContent = docNames || '';
+
+      const primaryChat = (result.chats || [])[0];
+      const summary = {
+        session_id: sessionId,
+        title: primaryChat?.title || (state.sessions.find((s) => s.session_id === sessionId)?.title) || 'Cuộc trò chuyện',
+        chat_id: primaryChat?.chat_id || null,
+        message_count: primaryChat?.message_count ?? 0,
+        updated_at: primaryChat?.updated_at ?? null,
+        doc_count: (result.manifest?.docs || []).length,
+        docs: result.manifest?.docs || [],
+      };
+      upsertSessionSummary(summary);
+
+      rebuildChatState(result.chats || []);
+
+      const chatId = primaryChat?.chat_id || summary.chat_id;
+      if (chatId) {
+        state.activeChatId = chatId;
+        await setActiveChat(chatId, { reload: true });
+      } else {
+        state.activeChatId = null;
+        resetChatUI();
+      }
+
+      const canAsk = result.can_ask ?? false;
+      dom.askButton.disabled = !canAsk;
+      dom.queryInput.disabled = !canAsk;
+      dom.queryInput.placeholder = canAsk
+        ? 'Bây giờ, hãy hỏi tôi điều gì đó...'
+        : 'Hãy tải lên và xử lý tài liệu trước.';
+
+      renderChatList();
+    } catch (error) {
+      console.error('Error setting active session:', error);
+      showToast(error.message, 'error');
+    } finally {
+      setStatus('Sẵn sàng');
+    }
+  };
+
+  const ensureSessionInitialized = async ({ silent = false } = {}) => {
+    if (state.sessionId) return state.sessionId;
+    if (!silent) setStatus('Đang tạo cuộc trò chuyện mới...', 'processing');
+    try {
+      const response = await fetch('/session', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Không thể tạo cuộc trò chuyện mới');
+      }
+
+      if (result.session) {
+        upsertSessionSummary(result.session);
+      }
+
+      state.chats = {};
+      state.activeChatId = null;
+      state.files = [];
+      renderFileList();
+      resetChatUI();
+
+      await setActiveSession(result.session_id, { forceReload: true });
+      if (!silent) {
+        showToast('Đã tạo cuộc trò chuyện mới.', 'success');
+      }
+      return result.session_id;
+    } catch (error) {
+      showToast(error.message, 'error');
+      throw error;
+    } finally {
+      if (!silent) setStatus('Sẵn sàng');
+    }
+  };
+
   const showToast = (message, type = 'info') => {
     dom.toastElement.querySelector('.toast-body').textContent = message;
-    dom.toastElement.className = `toast bg-${type === 'error' ? 'danger' : 'success'}`;
+    dom.toastElement.className = `toast ${type === 'error' ? 'bg-danger' : 'bg-success'}`;
     bsToast.show();
   };
 
@@ -141,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
   };
 
   const setStatus = (text, type = 'ready') => {
@@ -149,52 +334,6 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.statusIndicator.className = `status-indicator-${type}`;
   };
 
-  // --- New Session ---
-  const startNewSession = () => {
-    if (confirm('Bạn có chắc muốn bắt đầu phiên làm việc mới? Điều này sẽ xóa tất cả tài liệu và cuộc hội thoại hiện tại.')) {
-      // Clear session storage
-      clearSessionFromStorage();
-
-      // Reset state
-      state.files = [];
-      state.sessionId = null;
-      state.isIngesting = false;
-      state.isAsking = false;
-
-      // Reset UI
-      renderFileList();
-      dom.askButton.disabled = true;
-      dom.queryInput.disabled = true;
-      dom.queryInput.placeholder = "Hỏi điều gì đó về tài liệu của bạn...";
-      dom.docTitle.textContent = '';
-      dom.ingestButton.innerHTML = '<i class="bi bi-gear"></i> Xử lý & Vector hóa';
-      dom.ingestButton.disabled = true;
-
-      // Clear chat
-      dom.chatContainer.innerHTML = `
-        <div id="welcome-screen" class="welcome-screen">
-          <div class="welcome-icon">🤖</div>
-          <h3>Trợ lý tài liệu RAG xin chào!</h3>
-          <p>Hãy bắt đầu bằng cách tải lên tài liệu PDF của bạn ở thanh bên trái.</p>
-          <div class="onboarding-steps">
-            <div class="step"><span>1</span> Tải lên PDF</div>
-            <div class="step"><span>2</span> Đặt câu hỏi</div>
-            <div class="step"><span>3</span> Nhận câu trả lời & trích dẫn</div>
-          </div>
-        </div>
-      `;
-      dom.welcomeScreen = document.getElementById('welcome-screen');
-
-      // Clear knowledge sidebar
-      dom.knowledgePlaceholder.style.display = 'block';
-      dom.knowledgeContent.style.display = 'none';
-
-      setStatus('Sẵn sàng');
-      showToast('Đã bắt đầu phiên làm việc mới.', 'success');
-    }
-  };
-
-  // --- Theme Management ---
   const applyTheme = (theme) => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
@@ -202,51 +341,372 @@ document.addEventListener('DOMContentLoaded', () => {
     icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
   };
 
-  dom.themeToggle.addEventListener('click', () => {
-    const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    applyTheme(newTheme);
-  });
+  const resetChatUI = () => {
+    dom.chatContainer.innerHTML = WELCOME_HTML;
+    dom.chatContainer.scrollTop = dom.chatContainer.scrollHeight;
+    renderCitations([]);
+  };
 
-  dom.newSessionBtn.addEventListener('click', startNewSession);
+  const resetChatState = ({ preserveSessions = false } = {}) => {
+    state.chats = {};
+    state.activeChatId = null;
+    if (!preserveSessions) {
+      state.sessions = [];
+    }
+    renderChatList();
+    resetChatUI();
+    updateSessionMeta();
+  };
 
-  // --- File Handling ---
+  const syncChatMeta = (meta) => {
+    if (!meta || !meta.chat_id) return;
+    const previous = state.chats[meta.chat_id] || {};
+    const messages = meta.messages !== undefined ? meta.messages : previous.messages || [];
+    const messageCount = meta.message_count ?? messages.length;
+    state.chats[meta.chat_id] = {
+      ...previous,
+      ...meta,
+      messages,
+      message_count: messageCount,
+    };
+    if (state.sessionId) {
+      const currentSummary = state.sessions.find((session) => session.session_id === state.sessionId) || {};
+      upsertSessionSummary({
+        session_id: state.sessionId,
+        title: meta.title || currentSummary.title || 'Cuộc trò chuyện',
+        chat_id: meta.chat_id,
+        message_count: messageCount,
+        updated_at: meta.updated_at || currentSummary.updated_at || Date.now() / 1000,
+        doc_count: currentSummary.doc_count,
+        docs: currentSummary.docs,
+      });
+    }
+  };
+
+  const rebuildChatState = (chatArray = []) => {
+    const existingMessages = {};
+    Object.entries(state.chats).forEach(([id, chat]) => {
+      existingMessages[id] = chat.messages || [];
+    });
+    state.chats = {};
+    const limitedChats = chatArray.slice(0, 1);
+    limitedChats.forEach((meta) => {
+      const id = meta.chat_id;
+      const messages = existingMessages[id] || [];
+      state.chats[id] = {
+        ...meta,
+        messages,
+        message_count: meta.message_count ?? messages.length,
+      };
+      if (state.sessionId) {
+        const currentSummary = state.sessions.find((session) => session.session_id === state.sessionId) || {};
+        upsertSessionSummary({
+          session_id: state.sessionId,
+          title: meta.title || currentSummary.title || 'Cuộc trò chuyện',
+          chat_id: id,
+          message_count: meta.message_count ?? messages.length,
+          updated_at: meta.updated_at || currentSummary.updated_at,
+          doc_count: currentSummary.doc_count,
+          docs: currentSummary.docs,
+        });
+      }
+    });
+  };
+
+  const renderChatList = () => {
+    dom.chatList.innerHTML = '';
+    if (state.sessions.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-list-empty';
+      empty.textContent = 'Chưa có cuộc trò chuyện nào';
+      dom.chatList.appendChild(empty);
+      updateSessionMeta();
+      return;
+    }
+
+    state.sessions.forEach((sessionSummary) => {
+      const chat = sessionSummary.chat_id ? state.chats[sessionSummary.chat_id] || {} : {};
+      const sessionId = sessionSummary.session_id;
+      const chatId = sessionSummary.chat_id;
+      const item = document.createElement('div');
+      item.className = `chat-item${sessionId === state.sessionId ? ' active' : ''}`;
+      item.dataset.sessionId = sessionId;
+      if (chatId) {
+        item.dataset.chatId = chatId;
+      }
+
+      const content = document.createElement('div');
+      content.className = 'chat-item-content';
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'chat-item-title';
+      titleSpan.textContent = sessionSummary.title || chat.title || 'Cuộc trò chuyện';
+      content.appendChild(titleSpan);
+
+      const count = chat.messages ? chat.messages.length : sessionSummary.message_count || 0;
+      const metaSpan = document.createElement('span');
+      metaSpan.className = 'chat-item-meta';
+      metaSpan.textContent = count > 0 ? `${count} tin nhắn` : 'Chưa có tin nhắn';
+      content.appendChild(metaSpan);
+
+      const actions = document.createElement('div');
+      actions.className = 'chat-item-actions';
+
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.className = 'btn btn-icon btn-rename';
+      renameBtn.dataset.action = 'rename';
+      renameBtn.dataset.sessionId = sessionId;
+      if (chatId) renameBtn.dataset.chatId = chatId;
+      renameBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+      renameBtn.title = 'Đổi tên cuộc trò chuyện';
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-icon btn-delete';
+      deleteBtn.dataset.action = 'delete';
+      deleteBtn.dataset.sessionId = sessionId;
+      if (chatId) deleteBtn.dataset.chatId = chatId;
+      deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+      deleteBtn.title = 'Xoá cuộc trò chuyện';
+
+      actions.append(renameBtn, deleteBtn);
+
+      item.append(content, actions);
+      dom.chatList.appendChild(item);
+    });
+
+    updateSessionMeta();
+  };
+
+  const formatTextContent = (text) => {
+    if (!text) return '';
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^• /gm, '&nbsp;&nbsp;• ')
+      .replace(/\n\n/g, '<br><br>')
+      .replace(/\n/g, '<br>')
+      .replace(/(<br><br>)/g, '<br><br>')
+      .replace(/\[([^\]]+)\]/g, '<span class="citation-ref">[$1]</span>');
+  };
+
+  const updateKnowledgePanel = (chat) => {
+    if (!chat || !chat.messages || chat.messages.length === 0) {
+      renderCitations([]);
+      return;
+    }
+    for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
+      const message = chat.messages[i];
+      if (message.role === 'assistant' && message.sources && message.sources.length) {
+        renderCitations(message.sources);
+        return;
+      }
+    }
+    renderCitations([]);
+  };
+
+  const renderChatMessages = (chatId = state.activeChatId) => {
+    const chat = chatId ? state.chats[chatId] : null;
+    dom.chatContainer.innerHTML = '';
+
+    if (!chat || !chat.messages || chat.messages.length === 0) {
+      resetChatUI();
+      return;
+    }
+
+    chat.messages.forEach((message) => {
+      const bubble = document.createElement('div');
+      bubble.className = `chat-bubble ${message.role === 'assistant' ? 'ai' : 'user'}`;
+      if (message.role === 'assistant') {
+        bubble.innerHTML = formatTextContent(message.content || 'Đang xử lý...');
+      } else {
+        bubble.textContent = message.content || '';
+      }
+      dom.chatContainer.appendChild(bubble);
+    });
+
+    if (state.isAsking && chatId === state.activeChatId) {
+      const loadingBubble = document.createElement('div');
+      loadingBubble.className = 'chat-bubble ai';
+      loadingBubble.innerHTML = '<div class="d-flex align-items-center"><div class="dot-flashing"></div></div>';
+      dom.chatContainer.appendChild(loadingBubble);
+    }
+
+    dom.chatContainer.scrollTop = dom.chatContainer.scrollHeight;
+    updateKnowledgePanel(chat);
+  };
+
+  const renderCitations = (sources) => {
+    if (!sources || sources.length === 0) {
+      dom.knowledgePlaceholder.style.display = 'block';
+      dom.knowledgeContent.style.display = 'none';
+      dom.citationsList.innerHTML = '';
+      return;
+    }
+
+    dom.knowledgePlaceholder.style.display = 'none';
+    dom.knowledgeContent.style.display = 'block';
+    dom.citationsList.innerHTML = '';
+
+    sources.forEach((source) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+          <div class="card-body">
+            <h6 class="card-title">
+              <span class="citation-tag" title="Click để xem chi tiết">${source.filename}:${source.page}</span>
+            </h6>
+            <p class="card-text small">${source.content}</p>
+            <div class="text-end small text-muted">Score: ${(source.score ?? 0).toFixed(3)}</div>
+          </div>`;
+      dom.citationsList.appendChild(card);
+    });
+  };
+
+  const fetchChatMessages = async (chatId, { force = false } = {}) => {
+    if (!state.sessionId || !chatId) return null;
+    const existing = state.chats[chatId];
+    if (!force && existing && existing.messages && existing.messages.length > 0) {
+      return existing;
+    }
+    const response = await fetch(`/chat/${chatId}?session_id=${encodeURIComponent(state.sessionId)}`);
+    const result = await response.json();
+    if (!response.ok) {
+      showToast(result.error || 'Không thể tải lịch sử cuộc trò chuyện', 'error');
+      return null;
+    }
+    syncChatMeta(result.chat);
+    return state.chats[chatId];
+  };
+
+  const setActiveChat = async (chatId, { reload = false } = {}) => {
+    if (!chatId) return;
+    state.activeChatId = chatId;
+    if (!state.chats[chatId]) {
+      state.chats[chatId] = { chat_id: chatId, title: 'Cuộc trò chuyện', messages: [] };
+    }
+    await fetchChatMessages(chatId, { force: reload });
+    renderChatList();
+    renderChatMessages(chatId);
+  };
+
+  const refreshChatListFromServer = async () => {
+    if (!state.sessionId) return;
+    const response = await fetch(`/chat/list?session_id=${encodeURIComponent(state.sessionId)}`);
+    const result = await response.json();
+    if (!response.ok) {
+      showToast(result.error || 'Không thể lấy danh sách cuộc trò chuyện', 'error');
+      return;
+    }
+    rebuildChatState(result.chats || []);
+    renderChatList();
+  };
+
+  const ensureChatPresence = async ({ forceRefresh = false } = {}) => {
+    if (!state.sessionId) return;
+    const sessionSummary = state.sessions.find((session) => session.session_id === state.sessionId);
+    if (forceRefresh || !sessionSummary || !sessionSummary.chat_id) {
+      await refreshChatListFromServer();
+    }
+    const activeChatId = state.activeChatId && state.chats[state.activeChatId]
+      ? state.activeChatId
+      : (state.sessions.find((session) => session.session_id === state.sessionId)?.chat_id || null);
+    if (activeChatId) {
+      await setActiveChat(activeChatId, { reload: forceRefresh });
+    }
+  };
+
+  const handleRenameSession = async (sessionId, chatId) => {
+    if (!sessionId) return;
+    const summary = state.sessions.find((session) => session.session_id === sessionId) || {};
+    const currentTitle = summary.title || (chatId ? state.chats[chatId]?.title : '') || '';
+    const newTitle = prompt('Nhập tên cuộc trò chuyện', currentTitle);
+    if (newTitle === null) return;
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      showToast('Tiêu đề không được để trống', 'error');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('title', trimmed);
+    if (chatId) {
+      formData.append('chat_id', chatId);
+    }
+    const response = await fetch(`/session/${sessionId}/rename`, { method: 'POST', body: formData });
+    const result = await response.json();
+    if (!response.ok) {
+      showToast(result.error || 'Không thể đổi tên cuộc trò chuyện', 'error');
+      return;
+    }
+    if (result.session) {
+      upsertSessionSummary(result.session);
+      if (state.sessionId === sessionId && chatId) {
+        await fetchChatMessages(chatId, { force: true });
+        renderChatMessages(chatId);
+      }
+      renderChatList();
+    }
+    showToast('Đã đổi tên cuộc trò chuyện', 'success');
+  };
+
+  const handleDeleteSession = async (sessionId) => {
+    if (!sessionId) return;
+    if (!confirm('Bạn có chắc muốn xoá cuộc trò chuyện này?')) return;
+    const response = await fetch(`/session/${sessionId}`, {
+      method: 'DELETE',
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      showToast(result.error || 'Không thể xoá cuộc trò chuyện', 'error');
+      return;
+    }
+    removeSessionSummary(sessionId);
+    if (state.sessionId === sessionId) {
+      clearSessionFromStorage();
+      resetChatState({ preserveSessions: true });
+      state.sessionId = null;
+      state.activeChatId = null;
+      state.files = [];
+      renderFileList();
+      resetChatUI();
+      const nextSession = state.sessions[0];
+      if (nextSession) {
+        await setActiveSession(nextSession.session_id);
+      }
+    }
+    renderChatList();
+    showToast('Đã xoá cuộc trò chuyện', 'success');
+  };
+
   const renderFileList = () => {
     dom.fileList.innerHTML = '';
     if (state.files.length === 0) {
       dom.ingestButton.disabled = true;
+      updateSessionMeta();
       return;
     }
 
-    state.files.forEach(fileWrapper => {
+    state.files.forEach((fileWrapper) => {
       const fileItem = document.createElement('div');
       fileItem.className = 'file-item';
       fileItem.dataset.id = fileWrapper.id;
 
-      let statusIcon = '';
-      let fileName = fileWrapper.name || (fileWrapper.file && fileWrapper.file.name) || 'Unknown file';
-      let fileSize = fileWrapper.size || (fileWrapper.file && fileWrapper.file.size) || 0;
-
-      switch (fileWrapper.status) {
-        case 'uploading':
-          statusIcon = `<div class="spinner-border spinner-border-sm text-primary" role="status"></div>`;
-          break;
-        case 'uploaded':
-          statusIcon = `<i class="bi bi-check-circle-fill text-success"></i>`;
-          break;
-        case 'ingested':
-          statusIcon = `<i class="bi bi-check-circle-fill text-success"></i>`;
-          break;
-        case 'error':
-          statusIcon = `<i class="bi bi-x-circle-fill text-danger"></i>`;
-          break;
-        default:
-          statusIcon = `<i class="bi bi-file-earmark-arrow-up"></i>`;
+      const fileName = fileWrapper.name || fileWrapper.file?.name || 'Unknown file';
+      const fileSize = fileWrapper.size || fileWrapper.file?.size || 0;
+      let statusIcon = '<i class="bi bi-file-earmark-arrow-up"></i>';
+      if (fileWrapper.status === 'uploading') {
+        statusIcon = '<div class="spinner-border spinner-border-sm text-primary" role="status"></div>';
+      } else if (fileWrapper.status === 'uploaded' || fileWrapper.status === 'ingested') {
+        statusIcon = '<i class="bi bi-check-circle-fill text-success"></i>';
+      } else if (fileWrapper.status === 'error') {
+        statusIcon = '<i class="bi bi-x-circle-fill text-danger"></i>';
       }
 
-      // Show additional info for ingested files
-      let additionalInfo = '';
+      let statusLine = formatBytes(fileSize);
       if (fileWrapper.status === 'ingested' && fileWrapper.pages && fileWrapper.chunks) {
-        additionalInfo = ` • ${fileWrapper.pages} trang • ${fileWrapper.chunks} chunks`;
+        statusLine = `${statusLine} • ${fileWrapper.pages} trang • ${fileWrapper.chunks} chunks`;
+      } else if (fileWrapper.status === 'error' && fileWrapper.error) {
+        statusLine = `${statusLine} • ${fileWrapper.error}`;
       }
 
       fileItem.innerHTML = `
@@ -254,7 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="file-icon"><i class="bi bi-file-earmark-pdf-fill"></i></div>
           <div class="file-details">
             <div class="file-name" title="${fileName}">${fileName}</div>
-            <div class="file-status">${formatBytes(fileSize)}${additionalInfo}</div>
+            <div class="file-status">${statusLine}</div>
           </div>
         </div>
         <div class="file-actions">
@@ -262,116 +722,229 @@ document.addEventListener('DOMContentLoaded', () => {
           <button class="btn btn-icon btn-delete" data-id="${fileWrapper.id}" title="Xoá">
             <i class="bi bi-trash3"></i>
           </button>
-        </div>
-      `;
+        </div>`;
       dom.fileList.appendChild(fileItem);
     });
 
-    // Enable ingest button only if there are uploaded files that haven't been ingested
-    const hasUploadedFiles = state.files.some(f => f.status === 'uploaded');
-    const hasIngestedFiles = state.files.some(f => f.status === 'ingested');
-
-    dom.ingestButton.disabled = !hasUploadedFiles;
-
-    // If all files are ingested, change button text
-    if (hasIngestedFiles && !hasUploadedFiles) {
+    const hasUploaded = state.files.some((f) => f.status === 'uploaded');
+    const hasIngested = state.files.some((f) => f.status === 'ingested');
+    dom.ingestButton.disabled = !hasUploaded;
+    if (hasIngested && !hasUploaded) {
       dom.ingestButton.textContent = '✓ Đã xử lý';
       dom.ingestButton.disabled = true;
     } else {
       dom.ingestButton.innerHTML = '<i class="bi bi-gear"></i> Xử lý & Vector hóa';
     }
+
+    updateSessionMeta();
   };
 
-  const handleFiles = (files) => {
+  const handleFiles = async (files) => {
     const newFiles = Array.from(files)
-      .filter(file => (file.type && file.type.toLowerCase().includes('pdf')) || file.name.toLowerCase().endsWith('.pdf'))
-      .map(file => ({ file, id: `file-${Date.now()}-${Math.random()}`, status: 'pending' }));
-
+      .filter((file) => (file.type && file.type.toLowerCase().includes('pdf')) || file.name.toLowerCase().endsWith('.pdf'))
+      .map((file) => ({ file, id: `file-${Date.now()}-${Math.random()}`, status: 'pending' }));
+    if (newFiles.length === 0) return;
+    await ensureSessionInitialized({ silent: true });
     state.files.push(...newFiles);
     renderFileList();
     uploadFiles();
   };
 
   const uploadFiles = async () => {
-    const pendingFiles = state.files.filter(f => f.status === 'pending');
+    const pendingFiles = state.files.filter((f) => f.status === 'pending');
     if (pendingFiles.length === 0) return;
 
     const formData = new FormData();
-    if (state.sessionId) {
-      formData.append('session_id', state.sessionId);
-    }
-    pendingFiles.forEach(fw => {
+    if (state.sessionId) formData.append('session_id', state.sessionId);
+    pendingFiles.forEach((fw) => {
       fw.status = 'uploading';
       formData.append('files', fw.file);
     });
     renderFileList();
 
+    let response;
+    let result;
     try {
-      const response = await fetch('/upload', { method: 'POST', body: formData });
-      const result = await response.json();
+      response = await fetch('/upload', { method: 'POST', body: formData });
+      result = await response.json();
+    } catch (networkError) {
+      pendingFiles.forEach((fw) => {
+        fw.status = 'error';
+        fw.error = 'Mất kết nối khi tải lên';
+      });
+      renderFileList();
+      showToast(`Lỗi tải lên: ${networkError.message}`, 'error');
+      return;
+    }
 
-      if (!response.ok) throw new Error(result.error || 'Upload failed');
-
-      state.sessionId = result.session_id;
-      saveSessionToStorage(state.sessionId); // Save session to localStorage
-
-      let successfulUploads = 0;
-      result.files.forEach(uploadedFile => {
-        const serverName = uploadedFile.orig_name || uploadedFile.name;
-        const serverSize = uploadedFile.size;
-        const fileWrapper = state.files.find(
-          fw => fw.status === 'uploading' && (
-            fw.file.name === serverName || (serverSize && fw.file.size === serverSize)
-          )
+    const markErrors = (errorsList) => {
+      if (!Array.isArray(errorsList)) return 0;
+      let count = 0;
+      errorsList.forEach((err) => {
+        const name = err.file || '';
+        const reason = err.error || 'Lỗi không xác định';
+        const sanitizedName = sanitizeFilename(name);
+        const match = state.files.find(
+          (fw) => fw.status === 'uploading' && fw.file && fw.file.name === name,
+        ) || state.files.find(
+          (fw) => fw.status === 'uploading' && fw.file && name && fw.file.name.toLowerCase() === name.toLowerCase(),
+        ) || state.files.find(
+          (fw) => fw.status === 'uploading' && fw.serverDocName === sanitizedName,
         );
-        if (fileWrapper) {
-          fileWrapper.status = 'uploaded';
-          fileWrapper.serverDocName = uploadedFile.name;
-          successfulUploads++;
+        const target = match || state.files.find((fw) => fw.status === 'uploading' && !fw.serverDocName);
+        if (target) {
+          target.status = 'error';
+          target.error = reason;
+          count += 1;
         }
       });
+      return count;
+    };
 
-      if (successfulUploads > 0) {
-        showToast(`Đã tải lên thành công ${successfulUploads} file.`, 'success');
-        // Removed duplicate saveSessionToStorage call
+    if (!response.ok) {
+      const errorCount = markErrors(result?.errors);
+      if (errorCount === 0) {
+        pendingFiles.forEach((fw) => {
+          if (fw.status === 'uploading') {
+            fw.status = 'error';
+            fw.error = result?.error || 'Upload thất bại';
+          }
+        });
       }
-
-    } catch (error) {
-      showToast(`Lỗi tải lên: ${error.message}`, 'error');
-      pendingFiles.forEach(fw => fw.status = 'error');
-    } finally {
       renderFileList();
+      showToast(`Lỗi tải lên: ${result?.error || 'Upload failed'}`, 'error');
+      return;
     }
+
+    state.sessionId = result.session_id;
+    saveSessionToStorage(state.sessionId);
+
+    const errorCount = markErrors(result.errors);
+    let uploadedCount = 0;
+    result.files.forEach((uploadedFile) => {
+      const serverName = uploadedFile.orig_name || uploadedFile.name;
+      const serverSize = uploadedFile.size;
+      const match = state.files.find(
+        (fw) => fw.status === 'uploading' && (fw.file.name === serverName || fw.file.size === serverSize),
+      );
+      if (match) {
+        match.status = 'uploaded';
+        match.serverDocName = uploadedFile.name;
+        delete match.error;
+        uploadedCount += 1;
+      }
+    });
+
+    if (uploadedCount > 0 && errorCount === 0) {
+      showToast(`Đã tải lên thành công ${uploadedCount} file.`, 'success');
+    } else if (uploadedCount > 0 && errorCount > 0) {
+      showToast(`Tải thành công ${uploadedCount} file, ${errorCount} file lỗi.`, 'info');
+    } else if (uploadedCount === 0 && errorCount > 0) {
+      showToast('Toàn bộ file tải lên đều lỗi.', 'error');
+    }
+
+    if (uploadedCount > 0) {
+      try {
+        await ensureChatPresence({ forceRefresh: true });
+      } catch (err) {
+        console.error('Không thể đồng bộ chat sau khi upload:', err);
+      }
+    }
+
+    renderFileList();
   };
 
-  dom.fileUploader.addEventListener('click', (e) => {
-    if (e.target.tagName !== 'LABEL') {
+  dom.fileUploader.addEventListener('click', (event) => {
+    if (event.target.tagName !== 'LABEL') {
       dom.fileInput.click();
     }
   });
-  dom.fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-    dom.fileUploader.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+
+  dom.fileInput.addEventListener('change', (event) => {
+    handleFiles(event.target.files).catch((error) => {
+      console.error('File handling error:', error);
+      showToast(error.message, 'error');
     });
   });
+
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((name) => {
+    dom.fileUploader.addEventListener(name, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  });
+
   dom.fileUploader.addEventListener('dragover', () => dom.fileUploader.classList.add('drag-over'));
   dom.fileUploader.addEventListener('dragleave', () => dom.fileUploader.classList.remove('drag-over'));
-  dom.fileUploader.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+  dom.fileUploader.addEventListener('drop', (event) => {
+    handleFiles(event.dataTransfer.files).catch((error) => {
+      console.error('File handling error:', error);
+      showToast(error.message, 'error');
+    });
+  });
 
-  dom.fileList.addEventListener('click', (e) => {
-    const button = e.target.closest('button');
-    if (button && button.dataset.id) {
-      state.files = state.files.filter(fw => fw.id !== button.dataset.id);
+  dom.fileList.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-id]');
+    if (!button) return;
+    const fileEntry = state.files.find((fw) => fw.id === button.dataset.id);
+    if (!fileEntry) return;
+
+    const isUploaded = ['uploaded', 'ingested'].includes(fileEntry.status) && fileEntry.serverDocName;
+    if (!isUploaded || !state.sessionId) {
+      state.files = state.files.filter((fw) => fw.id !== button.dataset.id);
       renderFileList();
+      return;
+    }
+
+    setStatus('Đang xoá tài liệu...', 'processing');
+    try {
+      const encodedName = encodeURIComponent(fileEntry.serverDocName);
+      const response = await fetch(`/session/${state.sessionId}/file/${encodedName}`, { method: 'DELETE' });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Không thể xoá tài liệu');
+      }
+
+      if (result.session) {
+        const snapshot = result.session;
+        const serverFiles = mapServerFilesToState(snapshot.files || []);
+        const localOnly = state.files.filter(
+          (fw) => (!fw.serverDocName || fw.status === 'pending' || fw.status === 'uploading') && fw.id !== fileEntry.id,
+        );
+        state.files = [...localOnly, ...serverFiles];
+        dom.docTitle.textContent = state.files.map((f) => f.serverDocName || f.name).join(', ');
+        renderFileList();
+
+        upsertSessionSummary({
+          session_id: state.sessionId,
+          doc_count: snapshot.manifest?.docs?.length ?? 0,
+          docs: snapshot.manifest?.docs ?? [],
+        });
+
+        dom.askButton.disabled = !snapshot.can_ask;
+        dom.queryInput.disabled = !snapshot.can_ask;
+        dom.queryInput.placeholder = snapshot.can_ask
+          ? 'Bây giờ, hãy hỏi tôi điều gì đó...'
+          : 'Hãy tải lên và xử lý tài liệu trước.';
+
+        rebuildChatState(snapshot.chats || []);
+        renderChatList();
+        if (state.activeChatId) {
+          await fetchChatMessages(state.activeChatId, { force: true });
+          renderChatMessages(state.activeChatId);
+        }
+      }
+
+      showToast('Đã xoá tài liệu. Vui lòng xử lý lại để cập nhật vector.', 'info');
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setStatus('Sẵn sàng');
     }
   });
 
-  // --- Ingesting ---
   dom.ingestButton.addEventListener('click', async () => {
     if (state.isIngesting || !state.sessionId) return;
-
     state.isIngesting = true;
     dom.ingestButton.disabled = true;
     setStatus('Đang xử lý...', 'processing');
@@ -380,17 +953,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const formData = new FormData();
       formData.append('session_id', state.sessionId);
       formData.append('ocr', dom.ocrSwitch.checked);
-
       const response = await fetch('/ingest', { method: 'POST', body: formData });
       const result = await response.json();
-
       if (!response.ok) throw new Error(result.error || 'Ingest failed');
 
-      showToast(`Đã xử lý thành công ${result.total_chunks} chunks từ ${result.ingested.length} tài liệu.`, 'success');
-
-      // Update file status to 'ingested'
-      result.ingested.forEach(ingested => {
-        const fileWrapper = state.files.find(fw => fw.serverDocName === ingested.doc);
+      result.ingested.forEach((ingested) => {
+        const fileWrapper = state.files.find((fw) => fw.serverDocName === ingested.doc);
         if (fileWrapper) {
           fileWrapper.status = 'ingested';
           fileWrapper.pages = ingested.pages;
@@ -398,146 +966,206 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      renderFileList(); // Re-render to show updated status
-
-      dom.askButton.disabled = false;
-      dom.queryInput.disabled = false;
-      dom.queryInput.placeholder = "Bây giờ, hãy hỏi tôi điều gì đó...";
-      if (result.ingested.length > 0) {
-        dom.docTitle.textContent = result.ingested.map(d => d.doc).join(', ');
+      if (Array.isArray(result.docs)) {
+        result.docs.forEach((doc) => {
+          const fileWrapper = state.files.find((fw) => fw.serverDocName === (doc.doc || doc.name));
+          if (fileWrapper) {
+            fileWrapper.pages = doc.pages ?? fileWrapper.pages;
+            fileWrapper.chunks = doc.chunks ?? fileWrapper.chunks;
+            if (fileWrapper.status !== 'ingested') {
+              fileWrapper.status = 'ingested';
+            }
+          }
+        });
       }
 
-      saveSessionToStorage(state.sessionId); // Update session timestamp
-
+      renderFileList();
+      dom.askButton.disabled = false;
+      dom.queryInput.disabled = false;
+      dom.queryInput.placeholder = 'Bây giờ, hãy hỏi tôi điều gì đó...';
+      const docListForTitle = (Array.isArray(result.docs) && result.docs.length > 0)
+        ? result.docs
+        : result.ingested;
+      if (docListForTitle.length > 0) {
+        dom.docTitle.textContent = docListForTitle
+          .map((d) => d.doc || d.name)
+          .filter(Boolean)
+          .join(', ');
+      }
+      if (Array.isArray(result.docs)) {
+        upsertSessionSummary({
+          session_id: state.sessionId,
+          doc_count: result.docs.length,
+          docs: result.docs,
+        });
+      } else {
+        const existingSummary = state.sessions.find((session) => session.session_id === state.sessionId) || { docs: [] };
+        const existingDocsByName = new Map((existingSummary.docs || []).map((doc) => [doc.doc || doc.name, doc]));
+        result.ingested.forEach((doc) => {
+          existingDocsByName.set(doc.doc, doc);
+        });
+        const mergedDocs = Array.from(existingDocsByName.values());
+        upsertSessionSummary({
+          session_id: state.sessionId,
+          doc_count: mergedDocs.length,
+          docs: mergedDocs,
+        });
+      }
+      saveSessionToStorage(state.sessionId);
+      if (result.message) {
+        showToast(result.message, result.total_chunks > 0 ? 'success' : 'info');
+      } else {
+        showToast(`Đã xử lý thành công ${result.total_chunks} chunks từ ${result.ingested.length} tài liệu.`, 'success');
+      }
+      await ensureChatPresence();
     } catch (error) {
       showToast(`Lỗi xử lý: ${error.message}`, 'error');
     } finally {
       state.isIngesting = false;
-      dom.ingestButton.disabled = state.files.every(f => f.status !== 'uploaded');
+      dom.ingestButton.disabled = state.files.every((f) => f.status !== 'uploaded');
       setStatus('Sẵn sàng');
     }
   });
 
-  // --- Format text for better display ---
-  const formatTextContent = (text) => {
-    if (!text) return '';
-
-    // Convert markdown-style formatting to HTML
-    let formatted = text
-      // Convert **bold** to <strong>
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      // Convert bullet points
-      .replace(/^• /gm, '&nbsp;&nbsp;• ')
-      // Convert line breaks to <br>
-      .replace(/\n\n/g, '<br><br>')
-      .replace(/\n/g, '<br>')
-      // Add proper spacing after sections
-      .replace(/(<br><br>)/g, '<br><br>')
-      // Style citation references
-      .replace(/\[([^\]]+)\]/g, '<span class="citation-ref">[$1]</span>');
-
-    return formatted;
-  };
-
-  // --- Chat ---
-  const addChatMessage = (type, content) => {
-    if (dom.welcomeScreen) {
-      dom.welcomeScreen.remove();
-    }
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble ${type}`;
-    if (type === 'ai' && !content) {
-      bubble.innerHTML = `<div class="d-flex align-items-center"><div class="dot-flashing"></div></div>`;
-    } else {
-      // Format content for better display
-      bubble.innerHTML = type === 'ai' ? formatTextContent(content) : content;
-    }
-    dom.chatContainer.appendChild(bubble);
-    dom.chatContainer.scrollTop = dom.chatContainer.scrollHeight;
-    return bubble;
-  };
-
   const handleAsk = async () => {
     const query = dom.queryInput.value.trim();
     if (!query || state.isAsking) return;
+    if (!state.sessionId) {
+      showToast('Vui lòng tải lên và xử lý tài liệu trước khi hỏi.', 'error');
+      return;
+    }
+    await ensureChatPresence();
+    if (!state.activeChatId) {
+      showToast('Không thể tạo cuộc trò chuyện mới. Vui lòng thử lại.', 'error');
+      return;
+    }
 
-    state.isAsking = true;
-    dom.askButton.disabled = true;
     dom.queryInput.value = '';
+    dom.askButton.disabled = true;
+    state.isAsking = true;
     setStatus('AI đang suy nghĩ...', 'processing');
-    addChatMessage('user', query);
-    const loadingBubble = addChatMessage('ai', '');
+
+    const chat = state.chats[state.activeChatId] || { chat_id: state.activeChatId, messages: [] };
+    chat.messages = chat.messages || [];
+    chat.messages.push({ role: 'user', content: query, timestamp: Date.now() });
+    state.chats[state.activeChatId] = chat;
+    renderChatMessages(state.activeChatId);
 
     try {
       const formData = new FormData();
       formData.append('query', query);
       formData.append('session_id', state.sessionId);
+      formData.append('chat_id', state.activeChatId);
 
       const response = await fetch('/ask', { method: 'POST', body: formData });
       const result = await response.json();
-
       if (!response.ok) throw new Error(result.error || 'Ask failed');
 
-      // Format the answer properly before displaying
-      loadingBubble.innerHTML = formatTextContent(result.answer);
-      renderCitations(result.sources);
+      if (result.chat) {
+        syncChatMeta(result.chat);
+      }
 
+      await fetchChatMessages(state.activeChatId, { force: true });
+      renderChatList();
     } catch (error) {
-      loadingBubble.remove();
-      addChatMessage('ai', `Rất tiếc, đã có lỗi xảy ra: ${error.message}`);
+      const chatRef = state.chats[state.activeChatId];
+      if (chatRef) {
+        chatRef.messages.push({
+          role: 'assistant',
+          content: `Rất tiếc, đã có lỗi xảy ra: ${error.message}`,
+          timestamp: Date.now(),
+          sources: [],
+        });
+      }
       showToast(error.message, 'error');
     } finally {
       state.isAsking = false;
       dom.askButton.disabled = false;
       setStatus('Sẵn sàng');
+      if (state.activeChatId) {
+        renderChatMessages(state.activeChatId);
+      } else {
+        resetChatUI();
+      }
     }
   };
 
-  const renderCitations = (sources) => {
-    if (!sources || sources.length === 0) {
-      dom.knowledgePlaceholder.style.display = 'block';
-      dom.knowledgeContent.style.display = 'none';
+  const restoreSession = async () => {
+    const savedSessionId = getSessionFromStorage();
+    if (savedSessionId) {
+      try {
+        await setActiveSession(savedSessionId, { forceReload: true });
+        showToast('Đã khôi phục cuộc trò chuyện gần nhất.', 'success');
+        setStatus('Đã khôi phục phiên làm việc', 'ready');
+        return true;
+      } catch (error) {
+        console.error('Unable to restore saved session:', error);
+        clearSessionFromStorage();
+      }
+    }
+    if (state.sessions.length > 0) {
+      await setActiveSession(state.sessions[0].session_id, { forceReload: false });
+      return true;
+    }
+    return false;
+  };
+
+  const startNewSession = async () => {
+    setStatus('Đang tạo cuộc trò chuyện mới...', 'processing');
+    try {
+      state.sessionId = null;
+      await ensureSessionInitialized({ silent: true });
+      showToast('Đã tạo cuộc trò chuyện mới.', 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setStatus('Sẵn sàng');
+    }
+  };
+
+  dom.themeToggle.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+  });
+
+  dom.newSessionBtn.addEventListener('click', startNewSession);
+
+  dom.chatList.addEventListener('click', async (event) => {
+    const actionButton = event.target.closest('button[data-action]');
+    if (actionButton) {
+      const { action, sessionId, chatId } = actionButton.dataset;
+      if (action === 'rename') {
+        await handleRenameSession(sessionId, chatId);
+      } else if (action === 'delete') {
+        await handleDeleteSession(sessionId);
+      }
+      event.stopPropagation();
       return;
     }
-
-    dom.knowledgePlaceholder.style.display = 'none';
-    dom.knowledgeContent.style.display = 'block';
-    dom.citationsList.innerHTML = '';
-
-    sources.forEach(source => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.innerHTML = `
-            <div class="card-body">
-                <h6 class="card-title">
-                    <span class="citation-tag" title="Click để xem chi tiết">${source.filename}:${source.page}</span>
-                </h6>
-                <p class="card-text small">${source.content}</p>
-                <div class="text-end small text-muted">Score: ${source.score.toFixed(3)}</div>
-            </div>
-        `;
-      dom.citationsList.appendChild(card);
-    });
-  };
+    const item = event.target.closest('.chat-item');
+    if (item?.dataset.sessionId) {
+      await setActiveSession(item.dataset.sessionId);
+    }
+  });
 
   dom.askButton.addEventListener('click', handleAsk);
-  dom.queryInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  dom.queryInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       handleAsk();
     }
   });
 
-  // --- Initialization ---
   const init = async () => {
-    const preferredTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const preferredTheme = localStorage.getItem('theme')
+      || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     applyTheme(preferredTheme);
     dom.queryInput.disabled = true;
-
-    // Try to restore previous session
-    const sessionRestored = await restoreSession();
-
-    if (!sessionRestored) {
+    resetChatUI();
+    updateSessionMeta();
+    await loadSessionsFromServer();
+    const restored = await restoreSession();
+    if (!restored) {
       renderFileList();
       setStatus('Sẵn sàng');
     }

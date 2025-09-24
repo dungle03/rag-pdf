@@ -191,7 +191,20 @@ class FAISSStore:
 
 # Singleton store (khởi tạo lazy sau khi biết dim)
 _stores: Dict[str, FAISSStore] = {}
-UPLOAD_DIR = "./uploads"
+
+
+def _uploads_dir() -> str:
+    return os.getenv("UPLOAD_DIR", "./uploads")
+
+
+def _store_paths(session_id: str) -> tuple[str, str, str]:
+    base = _uploads_dir()
+    folder = os.path.join(base, session_id)
+    return (
+        folder,
+        os.path.join(folder, "faiss_index.bin"),
+        os.path.join(folder, "items.jsonl"),
+    )
 
 
 def get_store(session_id: str, dim: int = 768) -> FAISSStore:
@@ -200,9 +213,28 @@ def get_store(session_id: str, dim: int = 768) -> FAISSStore:
         return _stores[session_id]
 
     # Nếu chưa có trong cache, tạo mới từ file hoặc tạo rỗng
-    folder = os.path.join(UPLOAD_DIR, session_id)
-    db_path = os.path.join(folder, "faiss_index.bin")
+    folder, index_path, _ = _store_paths(session_id)
+    os.makedirs(folder, exist_ok=True)
 
-    store = FAISSStore(db_path=db_path, dim=dim)
+    store = FAISSStore(db_path=index_path, dim=dim)
     _stores[session_id] = store
     return store
+
+
+def drop_store(session_id: str) -> None:
+    """Loại bỏ store đã được cache của session (nếu có)."""
+    store = _stores.pop(session_id, None)
+    if store:
+        try:
+            store.clear()
+        except Exception:
+            pass
+
+    folder, index_path, items_path = _store_paths(session_id)
+    for path in (index_path, items_path):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+    # nếu folder trống sau khi xoá index, giữ nguyên (PDFs vẫn dùng)

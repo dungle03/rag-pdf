@@ -23,10 +23,6 @@
       </div>
       <div id="doc-title" class="doc-title"></div>
       <div class="header-actions">
-        <button id="btn-new-session" class="btn btn-icon" aria-label="Phiên làm việc mới"
-          title="Bắt đầu phiên làm việc mới">
-          <i class="bi bi-plus-circle"></i>
-        </button>
         <button id="theme-toggle" class="btn btn-icon" aria-label="Chuyển đổi giao diện"><i
             class="bi bi-moon-stars-fill"></i></button>
       </div>
@@ -34,45 +30,57 @@
   </header>
 
   <div class="main-layout">
-    <!-- Cột 1: Quản lý tài liệu -->
-    <aside class="sidebar" id="sidebar-docs">
-      <div class="sidebar-header">
-        <h5>Tài liệu của bạn</h5>
+    <!-- Sidebar trái: Phiên làm việc & cuộc trò chuyện -->
+    <aside class="sidebar sidebar-session" id="sidebar-session">
+      <div class="session-overview">
+        <div class="session-overview-header">
+          <div>
+            <span class="session-title-label">Phiên làm việc hiện tại</span>
+            <span id="session-id-badge" class="session-id-badge session-id-empty">Chưa bắt đầu</span>
+          </div>
+          <button id="btn-new-session" class="btn btn-outline-primary btn-sm" title="Tạo cuộc trò chuyện mới">
+            <i class="bi bi-plus-circle"></i> Chat mới
+          </button>
+        </div>
+        <div class="session-meta">
+          <div class="meta-row">
+            <i class="bi bi-files"></i>
+            <span id="session-doc-count">0 tài liệu</span>
+          </div>
+          <div class="meta-row">
+            <i class="bi bi-chat-dots"></i>
+            <span id="session-chat-count">0 cuộc trò chuyện</span>
+          </div>
+        </div>
+        <p class="session-hint">Mỗi cuộc trò chuyện là một session độc lập, bao gồm lịch sử và tài liệu của riêng nó.
+          Bạn có thể
+          tạo mới, đổi tên, xoá hoặc chuyển đổi giữa các đoạn chat ngay tại đây.</p>
       </div>
-      <div class="sidebar-content">
-        <div id="file-uploader" class="file-uploader">
-          <div class="uploader-icon"><i class="bi bi-cloud-arrow-up-fill"></i></div>
-          <p>Kéo thả file PDF vào đây</p>
-          <span>hoặc</span>
-          <label for="file-input" class="btn btn-primary mt-2">Chọn PDF</label>
-          <input type="file" id="file-input" accept="application/pdf" multiple hidden>
+
+      <div class="chat-panel">
+        <div class="chat-panel-header">
+          <div>
+            <h6>Danh sách cuộc trò chuyện</h6>
+            <p>Chọn để tiếp tục, dùng biểu tượng bút hoặc thùng rác để đổi tên và xoá.</p>
+          </div>
         </div>
-        <div id="file-list" class="file-list">
-          <!-- File items sẽ được thêm vào đây bằng JS -->
+        <div id="chat-list" class="chat-list">
+          <!-- Chat items sẽ được thêm bằng JS -->
         </div>
-      </div>
-      <div class="sidebar-footer">
-        <div class="form-check form-switch mb-2 ms-1">
-          <input class="form-check-input" type="checkbox" role="switch" id="ocr-switch">
-          <label class="form-check-label" for="ocr-switch">Sử dụng OCR (cho file ảnh/scan)</label>
-        </div>
-        <button id="btn-ingest" class="btn btn-secondary w-100" disabled>
-          <i class="bi bi-gear"></i> Xử lý & Vector hóa
-        </button>
       </div>
     </aside>
 
-    <!-- Cột 2: Khu vực Chat -->
+    <!-- Khu vực chat trung tâm -->
     <main class="chat-area">
       <div id="chat-container" class="chat-container">
         <div id="welcome-screen" class="welcome-screen">
           <div class="welcome-icon">🤖</div>
           <h3>Trợ lý tài liệu RAG xin chào!</h3>
-          <p>Hãy bắt đầu bằng cách tải lên tài liệu PDF của bạn ở thanh bên trái.</p>
+          <p>Hãy bắt đầu bằng cách tạo phiên làm việc và tải lên tài liệu PDF của bạn.</p>
           <div class="onboarding-steps">
-            <div class="step"><span>1</span> Tải lên PDF</div>
+            <div class="step"><span>1</span> Chat mới &amp; tải PDF</div>
             <div class="step"><span>2</span> Đặt câu hỏi</div>
-            <div class="step"><span>3</span> Nhận câu trả lời & trích dẫn</div>
+            <div class="step"><span>3</span> Nhận câu trả lời &amp; trích dẫn</div>
           </div>
         </div>
         <!-- Chat bubbles sẽ được thêm vào đây -->
@@ -93,21 +101,56 @@
       </div>
     </main>
 
-    <!-- Cột 3: Thanh bên Tri thức -->
-    <aside class="sidebar" id="sidebar-knowledge">
-      <div class="sidebar-header">
-        <h5>Thông tin tri thức</h5>
-      </div>
-      <div class="sidebar-content">
-        <div id="knowledge-placeholder" class="placeholder-wrapper">
-          <i class="bi bi-search placeholder-icon"></i>
-          <p class="mt-2">Các đoạn trích và nguồn tham chiếu sẽ xuất hiện ở đây khi bạn hỏi.</p>
-        </div>
-        <div id="knowledge-content" style="display: none;">
-          <h6 class="sidebar-subtitle"><i class="bi bi-body-text"></i> Đoạn văn liên quan</h6>
-          <div id="citations-list" class="citations-list">
-            <!-- Citations sẽ được thêm vào đây -->
+    <!-- Sidebar phải: Tri thức & tài liệu -->
+    <aside class="sidebar sidebar-resources" id="sidebar-resources">
+      <div class="resource-card knowledge-card">
+        <div class="resource-header">
+          <div>
+            <h5>Thông tin tri thức</h5>
+            <small>Các đoạn trích và nguồn tham chiếu mới nhất</small>
           </div>
+        </div>
+        <div class="resource-body knowledge-body">
+          <div id="knowledge-placeholder" class="placeholder-wrapper">
+            <i class="bi bi-search placeholder-icon"></i>
+            <p class="mt-2">Các đoạn trích và nguồn tham chiếu sẽ xuất hiện ở đây khi bạn hỏi.</p>
+          </div>
+          <div id="knowledge-content" class="knowledge-content" style="display: none;">
+            <h6 class="sidebar-subtitle"><i class="bi bi-body-text"></i> Đoạn văn liên quan</h6>
+            <div id="citations-list" class="citations-list">
+              <!-- Citations sẽ được thêm vào đây -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="resource-card upload-card">
+        <div class="resource-header">
+          <div>
+            <h5>Tài liệu PDF</h5>
+            <small>Quản lý tài liệu của phiên hiện tại</small>
+          </div>
+        </div>
+        <div class="resource-body uploader-body">
+          <div id="file-uploader" class="file-uploader">
+            <div class="uploader-icon"><i class="bi bi-cloud-arrow-up-fill"></i></div>
+            <p>Kéo thả file PDF vào đây</p>
+            <span>hoặc</span>
+            <label for="file-input" class="btn btn-primary mt-2">Chọn PDF</label>
+            <input type="file" id="file-input" accept="application/pdf" multiple hidden>
+          </div>
+          <div id="file-list" class="file-list">
+            <!-- File items sẽ được thêm vào đây bằng JS -->
+          </div>
+        </div>
+        <div class="resource-footer">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ocr-switch">
+            <label class="form-check-label" for="ocr-switch">Sử dụng OCR (cho file ảnh/scan)</label>
+          </div>
+          <button id="btn-ingest" class="btn btn-secondary w-100" disabled>
+            <i class="bi bi-gear"></i> Xử lý &amp; Vector hóa
+          </button>
         </div>
       </div>
     </aside>

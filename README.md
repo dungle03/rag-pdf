@@ -128,6 +128,7 @@ graph TB
 - **SQLite**: Local database cho embedding và answer cache
 - **File System**: Session-based file management với security validation
 - **Multi-threading**: Concurrent embedding generation với ThreadPool
+- **Đường dẫn linh hoạt**: FAISS index và manifest đồng bộ với cấu hình `UPLOAD_DIR` trong `.env`.
 
 ---
 
@@ -140,6 +141,8 @@ graph TB
 - **Text chunking thông minh**: Token-aware splitting (**300-500 tokens**, overlap **10-15%**)
 - **Noise removal**: Tự động phát hiện và loại bỏ header/footer lặp lại
 - **Session isolation**: Mỗi người dùng có workspace riêng biệt
+- **Chịu lỗi từng file**: Nếu một PDF vi phạm giới hạn hoặc sai định dạng, các file hợp lệ vẫn được lưu và hiển thị thông báo chi tiết.
+- **Xoá tài liệu an toàn**: Cho phép gỡ từng PDF khỏi session; manifest và vector store được thiết lập lại để tránh sót dữ liệu cũ.
 
 ### 🔍 Hệ thống tìm kiếm lai (Hybrid Search)
 - **Dense Retrieval**: Vector search với cosine similarity trên Gemini embeddings
@@ -159,6 +162,15 @@ graph TB
 - **Vietnamese Optimization**: Prompt được tối ưu cho tiếng Việt
 - **Confidence Scoring**: Tính toán độ tin cậy dựa trên vector similarity
 - **Temperature Control**: `temperature=0.1` cho output ổn định
+- **Thông báo lỗi rõ ràng**: Giám sát phản hồi Gemini để phát hiện prompt bị chặn/quá quota và phản hồi thân thiện cho người dùng.
+
+### 💬 Quản lý hội thoại đa phiên
+- **Mỗi chat = một session độc lập**: Khi tạo cuộc trò chuyện mới, hệ thống phát sinh session riêng, cô lập hoàn toàn lịch sử hội thoại và tài liệu.
+- **Bảng điều khiển trực quan**: Thanh bên trái hiển thị mã session, số tài liệu đã xử lý và tổng số đoạn chat để bạn theo dõi trạng thái nhanh chóng.
+- **Chuyển đổi tức thì**: Click để mở lại bất kỳ cuộc trò chuyện nào, mọi tin nhắn và trích dẫn được tải về ngay lập tức.
+- **Đổi tên linh hoạt**: Đặt lại tiêu đề chat chỉ bằng một cú nhấp chuột, giúp ghi nhớ nội dung làm việc.
+- **Xoá gọn gàng**: Loại bỏ những đoạn chat đã hoàn thành; session và vector store tương ứng được dọn sạch khỏi ổ đĩa.
+- **Khôi phục tự động**: Lưu session gần nhất vào LocalStorage; khi mở lại ứng dụng, cuộc trò chuyện cuối cùng được kích hoạt sẵn.
 
 ### ⚡ Tối ưu hiệu năng & Cache
 - **Multi-layer Caching**: 
@@ -378,9 +390,14 @@ curl -X POST "http://localhost:8000/ask" \
 | Endpoint | Method | Mô tả | Request Format | Response Format |
 |----------|--------|--------|----------------|-----------------|
 | `/` | GET | Trang chủ web interface | - | HTML template |
-| `/upload` | POST | Upload PDF files | **Form fields:**<br/>• `files`: MultiPart file array<br/>• `session_id`: UUID (optional) | ```json<br/>{ "session_id": "uuid", "files": [{"path": "./uploads/<session>/a.pdf", "name": "a.pdf", "size": 1024}] }``` |
+| `/session` | POST | Tạo session/chat mới trống | **Form fields:**<br/>• `title`: string (optional) | ```json<br/>{ "session_id": "...", "chat": {"chat_id": "..."}, "session": {...} }``` |
+| `/sessions` | GET | Liệt kê toàn bộ session hiện có | - | ```json<br/>{ "sessions": [{ "session_id": "...", "title": "...", "message_count": 0 }] }``` |
+| `/upload` | POST | Upload PDF files | **Form fields:**<br/>• `files`: multipart array<br/>• `session_id`: UUID (optional) | ```json<br/>{ "session_id": "uuid", "files": [...], "errors": [{ "file": "bad.pdf", "error": "File vượt quá 10 MB" }] }``` |
 | `/ingest` | POST | Xử lý và vector hóa tài liệu | **Form fields:**<br/>• `session_id`: UUID string<br/>• `ocr`: boolean (optional) | ```json<br/>{"ingested": [{"doc": "a.pdf", "pages": 10, "chunks": 35}], "total_chunks": 35, "latency_ms": 9123}``` |
 | `/ask` | POST | Đặt câu hỏi RAG | **Form fields:**<br/>• `query`: Vietnamese text<br/>• `session_id`: UUID<br/>• `selected_docs`: JSON array (optional) | ```json<br/>{"answer": "… [a.pdf:3] …", "confidence": 0.91, "sources": [...], "latency_ms": 1234}``` |
+| `/session/{session_id}/rename` | POST | Đổi tên session/chat | **Form fields:**<br/>• `title`: string<br/>• `chat_id`: string (optional) | ```json<br/>{ "session": { "session_id": "...", "title": "..." } }``` |
+| `/session/{session_id}` | DELETE | Xoá session cùng tài nguyên | - | ```json<br/>{ "deleted": true }``` |
+| `/session/{session_id}/file/{doc_name}` | DELETE | Xoá một PDF đã tải lên khỏi session hiện tại | - | ```json<br/>{ "deleted": true, "doc": "file.pdf", "session": {...} }``` |
 | `/docs` | GET | Liệt kê tài liệu đã xử lý | - | ```json<br/>{"sessions": [{"session_id": "...", "docs": [...]}]}``` |
 | `/healthz` | GET | Health check endpoint | - | ```json<br/>{"status": "ok"}``` |
 

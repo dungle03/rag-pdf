@@ -12,26 +12,19 @@ MAX_OUT = int(
 
 SYSTEM_PROMPT = (
     "Bạn là trợ lý AI chuyên nghiệp, trả lời câu hỏi dựa trên tài liệu với format rõ ràng và dễ đọc.\n\n"
-    
     "📋 **CẤU TRÚC TRẢ LỜI BẮT BUỘC:**\n\n"
-    
     "**[Câu mở đầu thân thiện]**\n\n"
-    
     "**🔍 Thông tin chính:**\n"
     "• Điểm 1 [doc:page]\n"
     "• Điểm 2 [doc:page]\n"
     "• Điểm 3 [doc:page]\n\n"
-    
-    "**� Chi tiết cụ thể:**\n"
+    "**🧠 Chi tiết cụ thể:**\n"
     "[Giải thích chi tiết với ví dụ]\n\n"
-    
     "**⚠️ Lưu ý quan trọng:**\n"
     "• Điều cần chú ý 1\n"
     "• Điều cần chú ý 2\n\n"
-    
     "**💡 Tóm tắt:**\n"
     "[Kết luận ngắn gọn]\n\n"
-    
     "🚨 **QUY TẮC QUAN TRỌNG:**\n"
     "• LUÔN xuống dòng giữa các phần\n"
     "• Sử dụng ** ** để in đậm tiêu đề\n"
@@ -91,7 +84,24 @@ Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
         },
     )
     resp = model.generate_content(prompt)
-    answer = (resp.text or "").strip() if hasattr(resp, "text") else str(resp)
+
+    feedback = getattr(resp, "prompt_feedback", None)
+    if feedback and getattr(feedback, "block_reason", None):
+        raise RuntimeError(f"Yêu cầu bị từ chối: {feedback.block_reason}")
+
+    answer = ""
+    if hasattr(resp, "text") and resp.text:
+        answer = resp.text.strip()
+    elif getattr(resp, "candidates", None):
+        for candidate in resp.candidates:
+            parts = getattr(getattr(candidate, "content", None), "parts", [])
+            texts = [p.text for p in parts if getattr(p, "text", None)]
+            if texts:
+                answer = "\n".join(texts).strip()
+                if answer:
+                    break
+    if not answer:
+        raise RuntimeError("Không nhận được phản hồi từ mô hình.")
 
     if passages:
         scores = [float(p.score or 0.0) for p in passages]
