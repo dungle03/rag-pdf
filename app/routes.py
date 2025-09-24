@@ -1,4 +1,4 @@
-import os, uuid, json, time, shutil
+import os, uuid, json, time, shutil, math
 import numpy as np
 from typing import List
 from fastapi import APIRouter, Request, UploadFile, File, Form
@@ -33,6 +33,35 @@ templates = Jinja2Templates(directory="templates")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MANIFEST_NAME = "manifest.json"
+
+
+def _score_to_probability(value: float | None) -> float:
+    if value is None:
+        return 0.0
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if v >= 50:
+        return 1.0
+    if v <= -50:
+        return 0.0
+    if 0.0 <= v <= 1.0:
+        return v
+    if v > 1.0:
+        return 1.0 / (1.0 + math.exp(-v))
+    # assume [-1,1]
+    return max(0.0, min(1.0, (v + 1.0) / 2.0))
+
+
+def _chunk_probability(chunk: Chunk) -> float:
+    meta = chunk.meta if isinstance(chunk.meta, dict) else {}
+    for key in ("relevance", "hybrid_score", "dense_score", "dense_score_raw"):
+        if key in meta:
+            prob = _score_to_probability(meta.get(key))
+            if prob > 0:
+                return prob
+    return _score_to_probability(getattr(chunk, "score", None))
 
 
 def _session_summary(session_id: str) -> dict:
@@ -486,6 +515,8 @@ async def ask(
         ENABLE_ANSWER_CACHE = get_bool("ENABLE_ANSWER_CACHE", True)
         HYBRID_ON = get_bool("HYBRID_ON", True)
         HYBRID_ALPHA = get_float("HYBRID_ALPHA", 0.5)
+        MIN_CONTEXT_PROB = get_float("ANSWER_MIN_CONTEXT_PROB", 0.3)
+        MIN_DIRECT_PROB = get_float("ANSWER_MIN_DIRECT_PROB", 0.2)
 
         # Chuẩn bị thông tin cho cache
         store = get_store(session_id=session_id)
@@ -565,6 +596,65 @@ async def ask(
             else retrieved[:CONTEXT_K]
         )
 
+        seen_keys: set[tuple[str, int, int]] = set()
+        qualified: list[Chunk] = []
+        best_chunk: Chunk | None = None
+        best_prob = 0.0
+        for chunk in passages:
+            key = (chunk.doc_name, chunk.page, chunk.chunk_id)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            prob = _chunk_probability(chunk)
+            if prob > best_prob:
+                best_prob = prob
+                best_chunk = chunk
+            if prob < MIN_CONTEXT_PROB:
+                continue
+            meta = dict(chunk.meta or {})
+            meta["relevance"] = prob
+            chunk.meta = meta
+            qualified.append(chunk)
+
+        if not qualified:
+            if best_chunk and best_prob >= MIN_DIRECT_PROB:
+                meta = dict(best_chunk.meta or {})
+                meta["relevance"] = best_prob
+                best_chunk.meta = meta
+                qualified = [best_chunk]
+            else:
+                apology = (
+                    "Xin lỗi, không tìm thấy thông tin phù hợp trong tài liệu hiện có."
+                )
+                latency = int((time.time() - t0) * 1000)
+                chat_after = append_exchange(
+                    UPLOAD_DIR,
+                    session_id,
+                    chat_id_value,
+                    query.strip(),
+                    apology,
+                    [],
+                    0.0,
+                )
+                chat_meta = {
+                    "chat_id": chat_after["chat_id"],
+                    "title": chat_after.get("title"),
+                    "updated_at": chat_after.get("updated_at"),
+                    "message_count": len(chat_after.get("messages", [])),
+                }
+                return {
+                    "answer": apology,
+                    "confidence": 0.0,
+                    "sources": [],
+                    "latency_ms": latency,
+                    "chat_id": chat_id_value,
+                    "chat": chat_meta,
+                }
+
+        passages = sorted(
+            qualified, key=lambda c: float(c.meta.get("relevance", 0.0)), reverse=True
+        )[:CONTEXT_K]
+
         # 5) Generate
         print("Generating answer...")
         answer, confidence = generate(query, passages)
@@ -574,6 +664,7 @@ async def ask(
                 "filename": p.doc_name,
                 "page": p.page,
                 "score": float(p.score or 0.0),
+                "relevance": float((p.meta or {}).get("relevance", 0.0)),
                 "content": (p.text[:300] + "…") if len(p.text) > 320 else p.text,
             }
             for p in passages

@@ -7,9 +7,11 @@ from app.utils.schema import Chunk
 
 _WORD = re.compile(r"\p{L}+\p{M}*|\d+", re.UNICODE)
 
+
 def _tokenize(text: str) -> List[str]:
     # tokenizer đơn giản cho TV: lấy chuỗi chữ (có dấu) & số → lower
     return [t.lower() for t in _WORD.findall(text or "")]
+
 
 def _norm01(x: np.ndarray) -> np.ndarray:
     # chuẩn hoá về [0,1] an toàn
@@ -20,6 +22,7 @@ def _norm01(x: np.ndarray) -> np.ndarray:
         return np.zeros_like(x)
     return (x - mn) / (mx - mn)
 
+
 def hybrid_retrieve(
     query_vec: np.ndarray,
     query_text: str,
@@ -27,7 +30,7 @@ def hybrid_retrieve(
     docs: Iterable[str] | None,
     top_k: int = 10,
     alpha: float = 0.6,
-    mmr_lambda: float = 0.5
+    mmr_lambda: float = 0.5,
 ) -> List[Chunk]:
     """
     Kết hợp dense (cosine) + sparse (BM25) rồi MMR.
@@ -37,12 +40,18 @@ def hybrid_retrieve(
     """
     allow = set(docs or [])
     # chọn candidates theo filter tài liệu
-    cand_ids = [i for i, it in enumerate(store.items) if not allow or it.meta.get("doc") in allow]
+    cand_ids = [
+        i
+        for i, it in enumerate(store.items)
+        if not allow or it.meta.get("doc") in allow
+    ]
     if not cand_ids:
         return []
 
     # 1) Dense sims (cosine), đã L2 nên dot = cosine in [-1,1] → map về [0,1]
-    dense_sims = np.array([float(store.items[i].vec @ query_vec) for i in cand_ids], dtype=np.float32)
+    dense_sims = np.array(
+        [float(store.items[i].vec @ query_vec) for i in cand_ids], dtype=np.float32
+    )
     dense01 = (dense_sims + 1.0) / 2.0
 
     # 2) BM25 sims
@@ -56,6 +65,16 @@ def hybrid_retrieve(
     combo = alpha * dense01 + (1 - alpha) * bm2501
     order = np.argsort(-combo)[: max(top_k * 3, top_k)]
     cand_top = [cand_ids[j] for j in order.tolist()]
+
+    score_meta = {}
+    for idx, gid in enumerate(cand_ids):
+        score_meta[gid] = {
+            "dense_score_raw": float(dense_sims[idx]),
+            "dense_score": float(dense01[idx]),
+            "bm25_score_raw": float(bm25_scores[idx]),
+            "bm25_score": float(bm2501[idx]),
+            "hybrid_score": float(combo[idx]),
+        }
 
     # 4) MMR (trên vector dense) để đa dạng
     chosen: list[int] = []
@@ -78,13 +97,17 @@ def hybrid_retrieve(
     out: List[Chunk] = []
     for gid in chosen:
         it = store.items[gid]
-        out.append(Chunk(
-            doc_name=it.meta["doc"],
-            page=it.meta["page"],
-            chunk_id=it.meta["chunk_id"],
-            text=it.text,
-            n_tokens=0,
-            score=float(store.items[gid].vec @ query_vec),  # lưu cosine để tính confidence
-            meta=it.meta,
-        ))
+        meta = dict(it.meta or {})
+        meta.update(score_meta.get(gid, {}))
+        out.append(
+            Chunk(
+                doc_name=meta["doc"],
+                page=meta["page"],
+                chunk_id=meta["chunk_id"],
+                text=it.text,
+                n_tokens=0,
+                score=meta.get("hybrid_score", 0.0),
+                meta=meta,
+            )
+        )
     return out

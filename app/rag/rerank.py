@@ -1,7 +1,17 @@
 # app/rag/rerank.py
 from __future__ import annotations
 from typing import List
+import math
 from app.utils.schema import Chunk
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 50:
+        return 1.0
+    if value <= -50:
+        return 0.0
+    return 1.0 / (1.0 + math.exp(-value))
+
 
 _MODEL = None
 _AVAILABLE = False
@@ -27,13 +37,18 @@ def rerank(passages: List[Chunk], query: str, top_k: int = 6) -> List[Chunk]:
     if not _AVAILABLE or not passages:
         return passages[:top_k]
     pairs = [(query, p.text) for p in passages]
-    import numpy as np
 
     scores = _MODEL.predict(pairs, convert_to_numpy=True).tolist()
     # sắp xếp giảm dần
     idx = sorted(range(len(passages)), key=lambda i: scores[i], reverse=True)[:top_k]
     out = []
     for i in idx:
-        p = passages[i].copy(update={"score": float(scores[i])})
-        out.append(p)
+        chunk = passages[i]
+        score = float(scores[i])
+        chunk.score = score
+        if isinstance(chunk.meta, dict):
+            meta = dict(chunk.meta)
+            meta["relevance"] = _sigmoid(score)
+            chunk.meta = meta
+        out.append(chunk)
     return out

@@ -258,6 +258,8 @@ RERANK_ON=true                    # Bật BGE reranker (tăng latency ~500ms)
 
 # === Generation Settings ===
 GENERATE_MIN_SIM=0.20             # Threshold tối thiểu để sinh câu trả lời
+ANSWER_MIN_CONTEXT_PROB=0.30      # Bỏ qua câu trả lời nếu ngữ cảnh quá yếu
+ANSWER_MIN_DIRECT_PROB=0.20       # Từ chối nếu không đủ bằng chứng trực tiếp
 GEN_TEMPERATURE=0.1               # Temperature cho generation (0.1 = ổn định)
 GEN_MAX_OUTPUT_TOKENS=256         # Giới hạn độ dài output
 
@@ -292,6 +294,7 @@ CHUNK_OVERLAP=50                  # Overlap giữa chunks (tokens)
 > - **GEMINI_API_KEY**: Lấy từ [Google AI Studio](https://aistudio.google.com/) (miễn phí)
 > - **HYBRID_ALPHA**: 0.5 = cân bằng, >0.5 = ưu tiên BM25, <0.5 = ưu tiên Vector
 > - **RERANK_ON**: `true` tăng accuracy nhưng tăng latency, `false` để demo nhanh
+> - **ANSWER_MIN_CONTEXT_PROB / ANSWER_MIN_DIRECT_PROB**: Điều chỉnh để kiểm soát mức độ tự tin tối thiểu trước khi trả lời; tăng giá trị nếu muốn chatbot thận trọng hơn.
 > - **Cache**: Bật để tiết kiệm API quota khi test/demo nhiều lần
 
 #### Bước 3: Cài đặt OCR (Tuỳ chọn)

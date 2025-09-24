@@ -167,15 +167,24 @@ class FAISSStore:
         out: List[Chunk] = []
         for i in picked:
             it = self.items[i]
+            cos = float(np.dot(it.vec, query_vec))
+            score_norm = (cos + 1.0) / 2.0
+            meta = dict(it.meta or {})
+            meta.update(
+                {
+                    "dense_score_raw": cos,
+                    "dense_score": score_norm,
+                }
+            )
             out.append(
                 Chunk(
-                    doc_name=it.meta["doc"],
-                    page=it.meta["page"],
-                    chunk_id=it.meta["chunk_id"],
+                    doc_name=meta["doc"],
+                    page=meta["page"],
+                    chunk_id=meta["chunk_id"],
                     text=it.text,
                     n_tokens=0,
-                    score=float(np.dot(it.vec, query_vec)),
-                    meta=it.meta,
+                    score=score_norm,
+                    meta=meta,
                 )
             )
         return out
