@@ -333,13 +333,13 @@ pip install sentence-transformers
 
 ```bash
 # Development mode (auto-reload)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # Production mode
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
 ```
 
-Truy cập ứng dụng tại: `http://localhost:8000`
+Truy cập ứng dụng tại: `http://127.0.0.1:8000`
 
 ### Quy trình sử dụng cơ bản
 
@@ -369,21 +369,21 @@ Truy cập ứng dụng tại: `http://localhost:8000`
 
 ```bash
 # Health check
-curl http://localhost:8000/healthz
+curl http://127.0.0.1:8000/healthz
 
 # Upload file qua API
-curl -X POST "http://localhost:8000/upload" \
+curl -X POST "http://127.0.0.1:8000/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "files=@document.pdf" \
   -F "session_id=test-session"
 
 # Ingest documents
-curl -X POST "http://localhost:8000/ingest" \
+curl -X POST "http://127.0.0.1:8000/ingest" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "session_id=test-session&ocr=false"
 
 # Ask question
-curl -X POST "http://localhost:8000/ask" \
+curl -X POST "http://127.0.0.1:8000/ask" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "session_id=test-session&query=Nội dung chính của tài liệu là gì?"
 ```
