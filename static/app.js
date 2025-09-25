@@ -23,9 +23,22 @@ document.addEventListener('DOMContentLoaded', () => {
     statusIndicator: document.getElementById('status-indicator'),
     statusText: document.getElementById('status-text'),
     toastElement: document.getElementById('notification-toast'),
+    // Modal elements
+    renameModalEl: document.getElementById('renameModal'),
+    renameInput: null,
+    renameConfirmBtn: null,
+    deleteModalEl: document.getElementById('deleteModal'),
+    deleteConfirmBtn: null,
   };
 
   const bsToast = new bootstrap.Toast(dom.toastElement);
+
+  // Initialize modal instances (after DOM loaded)
+  const renameModal = dom.renameModalEl ? new bootstrap.Modal(dom.renameModalEl) : null;
+  const deleteModal = dom.deleteModalEl ? new bootstrap.Modal(dom.deleteModalEl) : null;
+  if (dom.renameModalEl) dom.renameInput = document.getElementById('rename-input');
+  if (dom.renameModalEl) dom.renameConfirmBtn = document.getElementById('rename-confirm-btn');
+  if (dom.deleteModalEl) dom.deleteConfirmBtn = document.getElementById('delete-confirm-btn');
 
   const WELCOME_HTML = `
         <div class="welcome-screen">
@@ -618,64 +631,124 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const handleRenameSession = async (sessionId, chatId) => {
     if (!sessionId) return;
+    // Open rename modal and prefill
     const summary = state.sessions.find((session) => session.session_id === sessionId) || {};
     const currentTitle = summary.title || (chatId ? state.chats[chatId]?.title : '') || '';
-    const newTitle = prompt('Nhập tên cuộc trò chuyện', currentTitle);
-    if (newTitle === null) return;
-    const trimmed = newTitle.trim();
-    if (!trimmed) {
-      showToast('Tiêu đề không được để trống', 'error');
-      return;
-    }
-    const formData = new FormData();
-    formData.append('title', trimmed);
-    if (chatId) {
-      formData.append('chat_id', chatId);
-    }
-    const response = await fetch(`/session/${sessionId}/rename`, { method: 'POST', body: formData });
-    const result = await response.json();
-    if (!response.ok) {
-      showToast(result.error || 'Không thể đổi tên cuộc trò chuyện', 'error');
-      return;
-    }
-    if (result.session) {
-      upsertSessionSummary(result.session);
-      if (state.sessionId === sessionId && chatId) {
-        await fetchChatMessages(chatId, { force: true });
-        renderChatMessages(chatId);
+    if (!renameModal || !dom.renameInput || !dom.renameConfirmBtn) {
+      // fallback to prompt
+      const newTitle = prompt('Nhập tên cuộc trò chuyện', currentTitle);
+      if (newTitle === null) return;
+      const trimmed = newTitle.trim();
+      if (!trimmed) {
+        showToast('Tiêu đề không được để trống', 'error');
+        return;
       }
-      renderChatList();
+      await performRename(sessionId, chatId, trimmed);
+      return;
     }
-    showToast('Đã đổi tên cuộc trò chuyện', 'success');
+
+    dom.renameInput.value = currentTitle;
+    renameModal.show();
+
+    const onConfirm = async () => {
+      const trimmed = (dom.renameInput.value || '').trim();
+      if (!trimmed) {
+        showToast('Tiêu đề không được để trống', 'error');
+        return;
+      }
+      dom.renameConfirmBtn.disabled = true;
+      await performRename(sessionId, chatId, trimmed);
+      dom.renameConfirmBtn.disabled = false;
+      renameModal.hide();
+      dom.renameConfirmBtn.removeEventListener('click', onConfirm);
+    };
+
+    dom.renameConfirmBtn.addEventListener('click', onConfirm);
+  };
+
+  const performRename = async (sessionId, chatId, newTitle) => {
+    try {
+      const formData = new FormData();
+      formData.append('title', newTitle);
+      if (chatId) {
+        formData.append('chat_id', chatId);
+      }
+      const response = await fetch(`/session/${sessionId}/rename`, { method: 'POST', body: formData });
+      const result = await response.json();
+      if (!response.ok) {
+        showToast(result.error || 'Không thể đổi tên cuộc trò chuyện', 'error');
+        return;
+      }
+      if (result.session) {
+        upsertSessionSummary(result.session);
+        if (state.sessionId === sessionId && chatId) {
+          await fetchChatMessages(chatId, { force: true });
+          renderChatMessages(chatId);
+        }
+        renderChatList();
+      }
+      showToast('Đã đổi tên cuộc trò chuyện', 'success');
+    } catch (err) {
+      console.error('Rename error:', err);
+      showToast(err.message || 'Lỗi khi đổi tên', 'error');
+    }
   };
 
   const handleDeleteSession = async (sessionId) => {
     if (!sessionId) return;
-    if (!confirm('Bạn có chắc muốn xoá cuộc trò chuyện này?')) return;
-    const response = await fetch(`/session/${sessionId}`, {
-      method: 'DELETE',
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      showToast(result.error || 'Không thể xoá cuộc trò chuyện', 'error');
+    if (!deleteModal || !dom.deleteConfirmBtn) {
+      // fallback to confirm
+      if (!confirm('Bạn có chắc muốn xoá cuộc trò chuyện này?')) return;
+      await performDelete(sessionId);
       return;
     }
-    removeSessionSummary(sessionId);
-    if (state.sessionId === sessionId) {
-      clearSessionFromStorage();
-      resetChatState({ preserveSessions: true });
-      state.sessionId = null;
-      state.activeChatId = null;
-      state.files = [];
-      renderFileList();
-      resetChatUI();
-      const nextSession = state.sessions[0];
-      if (nextSession) {
-        await setActiveSession(nextSession.session_id);
+
+    // show modal and attach handler
+    const sessionSummary = state.sessions.find((s) => s.session_id === sessionId) || {};
+    const title = sessionSummary.title || 'cuộc trò chuyện';
+    const bodyEl = document.getElementById('delete-modal-body');
+    if (bodyEl) bodyEl.textContent = `Bạn có chắc muốn xoá "${title}"? Hành động này không thể hoàn tác.`;
+    deleteModal.show();
+
+    const onDeleteConfirm = async () => {
+      dom.deleteConfirmBtn.disabled = true;
+      await performDelete(sessionId);
+      dom.deleteConfirmBtn.disabled = false;
+      deleteModal.hide();
+      dom.deleteConfirmBtn.removeEventListener('click', onDeleteConfirm);
+    };
+
+    dom.deleteConfirmBtn.addEventListener('click', onDeleteConfirm);
+  };
+
+  const performDelete = async (sessionId) => {
+    try {
+      const response = await fetch(`/session/${sessionId}`, { method: 'DELETE' });
+      const result = await response.json();
+      if (!response.ok) {
+        showToast(result.error || 'Không thể xoá cuộc trò chuyện', 'error');
+        return;
       }
+      removeSessionSummary(sessionId);
+      if (state.sessionId === sessionId) {
+        clearSessionFromStorage();
+        resetChatState({ preserveSessions: true });
+        state.sessionId = null;
+        state.activeChatId = null;
+        state.files = [];
+        renderFileList();
+        resetChatUI();
+        const nextSession = state.sessions[0];
+        if (nextSession) {
+          await setActiveSession(nextSession.session_id);
+        }
+      }
+      renderChatList();
+      showToast('Đã xoá cuộc trò chuyện.', 'success');
+    } catch (err) {
+      console.error('Delete error:', err);
+      showToast(err.message || 'Lỗi khi xoá cuộc trò chuyện', 'error');
     }
-    renderChatList();
-    showToast('Đã xoá tài liệu và cập nhật dữ liệu liên quan.', 'success');
   };
 
   const renderFileList = () => {

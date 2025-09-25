@@ -877,13 +877,93 @@ body {
   color: var(--bg-secondary);
 }
 
-/* Keep generic danger minimal; specific styling handled above */
+/* Danger button: use red background with white text to match Bootstrap intent */
 .btn-danger {
-  color: #EF4444;
+  background-color: #ef4444;
+  color: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .btn-danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
+  background-color: #dc2626;
+  color: #ffffff;
+}
+
+/* Ensure modal action buttons are readable and tappable */
+.modal-footer .btn-danger {
+  background-color: #ef4444;
+  color: #ffffff !important;
+  /* visual specifics for danger kept minimal here; sizing handled by shared rule */
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.modal-footer .btn-danger:focus {
+  box-shadow: 0 0 0 0.15rem rgba(239, 68, 68, 0.25);
+}
+
+/* Make modal footer buttons consistent in size and spacing */
+.modal-footer .btn {
+  min-width: 88px;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* Ensure strict visual parity between modal action buttons */
+.modal-footer .btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 40px !important;
+  box-sizing: border-box !important;
+  line-height: 1 !important;
+  gap: .4rem !important;
+}
+
+/* Make secondary button visually similar to primary/danger */
+.modal-footer .btn-secondary {
+  background-color: var(--secondary-color) !important;
+  color: var(--bg-secondary) !important;
+  border: 1px solid rgba(0, 0, 0, 0.04) !important;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* Strong override for modal action buttons to ensure label visibility */
+#delete-confirm-btn,
+#rename-confirm-btn {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  min-width: 88px !important;
+  padding: 0.45rem 0.9rem !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  line-height: 1 !important;
+  position: relative !important;
+}
+
+/* Remove potential pseudo-elements that could cover text */
+#delete-confirm-btn::before,
+#delete-confirm-btn::after,
+#rename-confirm-btn::before,
+#rename-confirm-btn::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Ensure disabled state still shows readable label */
+#delete-confirm-btn:disabled,
+#rename-confirm-btn:disabled {
+  opacity: 0.7 !important;
+  color: #fff !important;
 }
 
 .form-control {
@@ -924,7 +1004,7 @@ body {
 }
 
 .toast-container {
-  right: 12px;
+  left: 12px;
   bottom: 12px;
 }
 
