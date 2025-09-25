@@ -615,7 +615,6 @@ python tests/load_test.py --sessions 10 --queries 100
 - **Môn học**: Chuyên đề Công nghệ Thông tin - Bài tập lớn
 - **Năm học**: 2024-2025
 - **Giảng viên hướng dẫn**: Thầy Bùi Ngọc Dũng
-- **Trường**: [Tên trường]
 
 ### Giấy phép sử dụng
 
