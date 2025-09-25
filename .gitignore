@@ -28,3 +28,4 @@ old_*.
 
 # log files
 *.log
+/logs/
