@@ -4,6 +4,7 @@ import math
 from typing import List, Tuple
 import google.generativeai as genai
 from app.utils.schema import Chunk
+from app.utils.logger import rag_logger
 
 LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gemini-1.5-flash")
 TEMP = float(os.getenv("GEN_TEMPERATURE", "0.1"))
@@ -124,25 +125,24 @@ Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
     if not answer:
         feedback = getattr(resp, "prompt_feedback", None)
         block_reason = getattr(feedback, "block_reason", None) if feedback else None
-        # Provide a friendly fallback message rather than raising an internal error
+        # Log details for debugging (do not expose internals to end user)
+        if resp_text_error:
+            rag_logger.warning(
+                "GenAI response parsing error: %s; prompt_block=%s",
+                resp_text_error,
+                bool(block_reason),
+            )
         if block_reason:
+            rag_logger.info("GenAI blocked request: %s", block_reason)
             answer = (
                 "Xin lỗi, yêu cầu của bạn bị mô hình từ chối do chính sách nội dung. "
                 "Vui lòng thử diễn đạt lại câu hỏi hoặc giảm bớt nội dung nhạy cảm."
             )
         else:
-            # If we captured a resp.text error, include a short hint for debugging in logs
-            if resp_text_error:
-                # Avoid exposing internal exception to end user; keep a generic message
-                answer = (
-                    "Xin lỗi, mô hình không trả về nội dung hợp lệ. Vui lòng thử lại sau hoặc "
-                    "chỉnh sửa câu hỏi. (response parsing fallback)"
-                )
-            else:
-                answer = (
-                    "Xin lỗi, mô hình không trả về nội dung. Vui lòng thử lại sau hoặc "
-                    "chỉnh sửa câu hỏi."
-                )
+            answer = (
+                "Xin lỗi, mô hình không trả về nội dung hợp lệ. Vui lòng thử lại sau hoặc "
+                "chỉnh sửa câu hỏi."
+            )
 
     if passages:
         scores = [_sigmoid(p.score) for p in passages]

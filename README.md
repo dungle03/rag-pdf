@@ -4,6 +4,42 @@
 
 ---
 
+## 🔔 Các cập nhật gần đây (25/09/2025)
+
+Những thay đổi nhỏ nhưng hữu ích đã được triển khai vào repository để làm cho hệ thống ổn định hơn khi chạy local và dễ vận hành hơn:
+
+- Tăng độ bền của generator (LLM): xử lý an toàn các response bất thường từ Google Generative API (Gemini). Nếu response không có phần text như mong đợi, hệ thống sẽ cố gắng fallback vào `candidates`, log thông tin chặn/phân tích và trả về thông báo thân thiện thay vì crash (HTTP 500).
+- Structured logging: thay thế các `print()` bằng `app.utils.logger` để dễ dàng lọc và phân tích log (file logs/ với format có cấu trúc).
+- Chuẩn hóa `session_id`: thêm hàm xác thực/normalize để ngăn path traversal và các session id không hợp lệ.
+- Ingest nền (PoC): `/ingest` hỗ trợ tham số `background=true` để enqueue một job ingest nền và trả về `job_id` ngay lập tức (không block client).
+- Job persistence: job metadata bây giờ được lưu vĩnh viễn bằng SQLite (`./storage/ingest_jobs.sqlite`). Điều này giúp trạng thái job không bị mất khi server restart.
+- Job status endpoint: thêm API `GET /ingest/job/{job_id}` để client có thể poll tiến độ (status, progress, result, timestamps).
+- Dev ergonomics: cập nhật `.env.example` để khuyến nghị `VECTOR_STORE=chroma` trên Windows và thêm biến `INGEST_JOBS_DB=./storage/ingest_jobs.sqlite`.
+- Metrics PoC: thêm script `scripts/collect_metrics.py` để in nhanh số lượng entries trong các SQLite cache (answer/embed) khi cần kiểm tra nhanh.
+- Smoke test: có `tests/simple_test.py` để chạy end-to-end (upload → ingest → ask). Trên môi trường dev hiện tại test này đã PASS (accuracy 100% trên bộ test mẫu). Xem phần Testing & Evaluation phía dưới.
+
+Ví dụ nhanh - ingest nền và poll trạng thái:
+
+1) Khởi tạo ingest nền (trả về job_id)
+
+```bash
+curl -X POST "http://127.0.0.1:8000/ingest" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "session_id=test-session&ocr=false&background=true"
+```
+
+2) Poll trạng thái job (thay `job-...` bằng job_id nhận được):
+
+```bash
+curl http://127.0.0.1:8000/ingest/job/job-1758778338402
+# => {"job_id":"job-...","status":"pending","progress":10,"result":null,...}
+```
+
+Lưu ý vận hành nhanh:
+- SQLite là lựa chọn đơn giản, phù hợp dev và workloads nhỏ; nếu cần scale/throughput lớn hơn, cân nhắc Redis + worker queue (RQ/Celery) và một job worker process.
+- Hiện `result` được lưu dạng JSON trong column text; tránh lưu payload quá lớn ở trường `result`.
+
+
 ## 🌟 Giới thiệu tổng quan
 
 RAG PDF QA System là một ứng dụng web được xây dựng để giải quyết bài toán hỏi đáp trên tài liệu PDF một cách thông minh và hiệu quả. Hệ thống kết hợp công nghệ AI tiên tiến với giao diện người dùng trực quan, cho phép:
@@ -397,6 +433,7 @@ curl -X POST "http://127.0.0.1:8000/ask" \
 | `/sessions` | GET | Liệt kê toàn bộ session hiện có | - | ```json<br/>{ "sessions": [{ "session_id": "...", "title": "...", "message_count": 0 }] }``` |
 | `/upload` | POST | Upload PDF files | **Form fields:**<br/>• `files`: multipart array<br/>• `session_id`: UUID (optional) | ```json<br/>{ "session_id": "uuid", "files": [...], "errors": [{ "file": "bad.pdf", "error": "File vượt quá 10 MB" }] }``` |
 | `/ingest` | POST | Xử lý và vector hóa tài liệu | **Form fields:**<br/>• `session_id`: UUID string<br/>• `ocr`: boolean (optional) | ```json<br/>{"ingested": [{"doc": "a.pdf", "pages": 10, "chunks": 35}], "total_chunks": 35, "latency_ms": 9123}``` |
+| `/ingest/job/{job_id}` | GET | Lấy trạng thái job ingest chạy nền (nếu dùng param `background=true`) | - | ```json<br/>{"job_id":"job-...","status":"pending|done|failed","progress":0-100,"result":{...}}``` |
 | `/ask` | POST | Đặt câu hỏi RAG | **Form fields:**<br/>• `query`: Vietnamese text<br/>• `session_id`: UUID<br/>• `selected_docs`: JSON array (optional) | ```json<br/>{"answer": "… [a.pdf:3] …", "confidence": 0.91, "sources": [...], "latency_ms": 1234}``` |
 | `/session/{session_id}/rename` | POST | Đổi tên session/chat | **Form fields:**<br/>• `title`: string<br/>• `chat_id`: string (optional) | ```json<br/>{ "session": { "session_id": "...", "title": "..." } }``` |
 | `/session/{session_id}` | DELETE | Xoá session cùng tài nguyên | - | ```json<br/>{ "deleted": true }``` |

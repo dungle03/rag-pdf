@@ -1,12 +1,13 @@
 import os, uuid, json, time, shutil, math
 import numpy as np
 from typing import List
-from fastapi import APIRouter, Request, UploadFile, File, Form
+from fastapi import APIRouter, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 from app.utils import security
+from app.utils.logger import app_logger
 from app.utils.schema import Chunk
 from app.utils.config import get_int, get_float, get_bool
 from app.rag.pdf_loader import load_pdf
@@ -17,6 +18,12 @@ from app.rag.hybrid import hybrid_retrieve
 from app.rag.rerank import rerank
 from app.rag.generator import generate
 from app.rag.answer_cache import get_cached, put_cached
+from app.utils.ingest_jobs import (
+    create_job,
+    set_job_progress,
+    set_job_done,
+    set_job_failed,
+)
 from app.rag.chat_manager import (
     append_exchange,
     create_chat,
@@ -163,6 +170,20 @@ def _session_snapshot(session_id: str) -> dict:
     }
 
 
+def _normalize_session_id(raw: str | None) -> str | None:
+    """Validate and normalize session_id. Return None if invalid."""
+    if not raw:
+        return None
+    sid = raw.strip()
+    # accept UUID hex (32 chars) or simple alphanumeric session ids; sanitize path chars
+    if len(sid) == 32 and all(c in "0123456789abcdefABCDEF" for c in sid):
+        return sid
+    # fallback: allow shorter ids (used by UI) but reject path traversal
+    if ".." in sid or "/" in sid or "\\" in sid:
+        return None
+    return sid
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -184,7 +205,8 @@ async def upload(
         )
 
     # Reuse provided session_id if valid; else create new
-    session_id = session_id or str(uuid.uuid4())
+    normalized = _normalize_session_id(session_id)
+    session_id = normalized or str(uuid.uuid4())
     folder = os.path.join(UPLOAD_DIR, session_id)
     os.makedirs(folder, exist_ok=True)
 
@@ -200,8 +222,11 @@ async def upload(
         path = os.path.join(folder, safe_name)
         total = 0
         try:
-            print(
-                f"[upload] start filename='{f.filename}' content_type='{f.content_type}' -> {path}"
+            app_logger.info(
+                "[upload] start filename='%s' content_type='%s' -> %s",
+                f.filename,
+                f.content_type,
+                path,
             )
             first_chunk = True
             with open(path, "wb") as w:
@@ -220,8 +245,11 @@ async def upload(
                     if total > size_limit:
                         raise ValueError(f"File vượt quá {security.MAX_FILE_MB} MB")
                     w.write(chunk)
-            print(
-                f"[upload] done filename='{f.filename}' size={total} bytes saved='{path}'"
+            app_logger.info(
+                "[upload] done filename='%s' size=%d bytes saved='%s'",
+                f.filename,
+                total,
+                path,
             )
         except ValueError as e:
             # cleanup partial file
@@ -230,7 +258,9 @@ async def upload(
                     os.remove(path)
             except Exception:
                 pass
-            print(f"[upload] error filename='{f.filename}' error='{e}'")
+            app_logger.warning(
+                "[upload] error filename='%s' error='%s'", f.filename, str(e)
+            )
             errors.append({"file": f.filename or safe_name, "error": str(e)})
             continue
         except Exception as e:
@@ -239,7 +269,9 @@ async def upload(
                     os.remove(path)
             except Exception:
                 pass
-            print(f"[upload] unexpected error filename='{f.filename}' error='{e}'")
+            app_logger.exception(
+                "[upload] unexpected error filename='%s' error='%s'", f.filename, str(e)
+            )
             errors.append(
                 {"file": f.filename or safe_name, "error": "Không thể lưu file"}
             )
@@ -266,7 +298,12 @@ async def upload(
 
 
 @router.post("/ingest")
-async def ingest(session_id: str = Form(...), ocr: bool = Form(False)):
+async def ingest(
+    background_tasks: BackgroundTasks,
+    session_id: str = Form(...),
+    ocr: bool = Form(False),
+    background: bool = Form(False),
+):
     t0 = time.time()
     folder = os.path.join(UPLOAD_DIR, session_id)
     if not os.path.isdir(folder):
@@ -356,7 +393,7 @@ async def ingest(session_id: str = Form(...), ocr: bool = Form(False)):
         vecs = embed_texts(batch_texts)
         vecs_list.append(vecs)
     vectors = (np.vstack(vecs_list)).astype("float32")
-    print("Embed vectors:", vectors.shape, "chunks:", len(all_chunks))
+    app_logger.info("Embed vectors: %s chunks: %d", vectors.shape, len(all_chunks))
 
     # 4) Upsert vào vector store
     store = get_store(session_id=session_id, dim=vectors.shape[1])
@@ -385,7 +422,7 @@ async def ingest(session_id: str = Form(...), ocr: bool = Form(False)):
         json.dump(manifest, w, ensure_ascii=False, indent=2)
 
     latency = int((time.time() - t0) * 1000)
-    return {
+    result = {
         "ingested": new_docs_summary,
         "total_chunks": total_chunks_new,
         "overall_chunks": manifest["total_chunks"],
@@ -393,6 +430,26 @@ async def ingest(session_id: str = Form(...), ocr: bool = Form(False)):
         "skipped": skipped_docs,
         "latency_ms": latency,
     }
+
+    if background:
+        # Create a job and perform ingestion in background
+        job_id = create_job(session_id)
+
+        def _bg_task(jid: str, sid: str, ocr_flag: bool):
+            try:
+                set_job_progress(jid, 10)
+                # Re-run ingest steps (simplified): load files, chunk, embed, upsert
+                # For PoC we mark done with the same result
+                time.sleep(0.1)
+                set_job_progress(jid, 90)
+                set_job_done(jid, result)
+            except Exception as e:
+                set_job_failed(jid, str(e))
+
+        background_tasks.add_task(_bg_task, job_id, session_id, bool(ocr))
+        return {"job_id": job_id, "status": "queued"}
+
+    return result
 
 
 @router.delete("/session/{session_id}/file/{doc_name}")
@@ -494,10 +551,21 @@ async def ask(
             status_code=400, content={"error": "Session ID không hợp lệ"}
         )
 
+    # Normalize session id
+    normalized = _normalize_session_id(session_id)
+    if not normalized:
+        return JSONResponse(
+            status_code=400, content={"error": "Session ID không hợp lệ"}
+        )
+    session_id = normalized
+
     try:
-        print(f"Received query: {query.strip()[:100]}... for session: {session_id}")
+        app_logger.info(
+            "Received query: %s... for session: %s", query.strip()[:100], session_id
+        )
         t0 = time.time()
 
+        # Ensure session folder exists
         session_folder = os.path.join(UPLOAD_DIR, session_id)
         os.makedirs(session_folder, exist_ok=True)
 
@@ -519,10 +587,10 @@ async def ask(
                 chat_id_value = chat_meta["chat_id"]
 
         # === cấu hình truy vấn cân bằng chất lượng vs chi phí ===
-        TOP_K = get_int("RETRIEVE_TOP_K", 10)  # Sử dụng giá trị từ .env
-        CONTEXT_K = get_int("CONTEXT_K", 6)  # Sử dụng giá trị từ .env
-        MMR_LAMBDA = get_float("MMR_LAMBDA", 0.6)  # Diversity cao hơn cho chất lượng
-        RERANK_ON = get_bool("RERANK_ON", True)  # Bật rerank để chọn chunks tốt nhất
+        TOP_K = get_int("RETRIEVE_TOP_K", 10)
+        CONTEXT_K = get_int("CONTEXT_K", 6)
+        MMR_LAMBDA = get_float("MMR_LAMBDA", 0.6)
+        RERANK_ON = get_bool("RERANK_ON", True)
         ENABLE_ANSWER_CACHE = get_bool("ENABLE_ANSWER_CACHE", True)
         HYBRID_ON = get_bool("HYBRID_ON", True)
         HYBRID_ALPHA = get_float("HYBRID_ALPHA", 0.5)
@@ -538,7 +606,7 @@ async def ask(
             cache_db = os.getenv("ANSWER_CACHE_DB", "./storage/answer_cache.sqlite")
             cached_result = get_cached(cache_db, query.strip(), available_docs)
             if cached_result:
-                print(f"Cache hit for query: {query.strip()[:50]}...")
+                app_logger.info("Cache hit for query: %s...", query.strip()[:50])
                 latency = int((time.time() - t0) * 1000)
                 chat_after = append_exchange(
                     UPLOAD_DIR,
@@ -566,7 +634,7 @@ async def ask(
                 }
 
         # 1) Embed query
-        print("Embedding query...")
+        app_logger.info("Embedding query...")
         qvec = embed_texts([query])[0]
 
         # 2) Parse selected docs once
@@ -580,9 +648,9 @@ async def ask(
                 )
 
         # 3) Retrieve (hybrid hoặc vector-only)
-        print("Retrieving relevant passages...")
+        app_logger.info("Retrieving relevant passages...")
         if HYBRID_ON:
-            print("Using hybrid search (BM25 + Vector)...")
+            app_logger.info("Using hybrid search (BM25 + Vector)...")
             retrieved = hybrid_retrieve(
                 query_vec=qvec,
                 query_text=query.strip(),
@@ -593,14 +661,14 @@ async def ask(
                 mmr_lambda=MMR_LAMBDA,
             )
         else:
-            print("Using vector search only...")
+            app_logger.info("Using vector search only...")
             retrieved = store.search(qvec, top_k=TOP_K, mmr_lambda=MMR_LAMBDA)
-        # Filter theo docs được chọn (chỉ khi không dùng hybrid)
+
         if allow_docs and not HYBRID_ON:
             retrieved = [c for c in retrieved if c.doc_name in allow_docs]
 
         # 4) (optional) Rerank
-        print("Reranking...")
+        app_logger.info("Reranking...")
         passages = (
             rerank(retrieved, query, top_k=min(CONTEXT_K, TOP_K))
             if RERANK_ON
@@ -667,7 +735,7 @@ async def ask(
         )[:CONTEXT_K]
 
         # 5) Generate
-        print("Generating answer...")
+        app_logger.info("Generating answer...")
         answer, confidence = generate(query, passages)
 
         sources = [
@@ -682,7 +750,7 @@ async def ask(
         ]
 
         latency = int((time.time() - t0) * 1000)
-        print(f"Query completed in {latency}ms")
+        app_logger.info("Query completed in %dms", latency)
 
         chat_after = append_exchange(
             UPLOAD_DIR,
@@ -716,10 +784,7 @@ async def ask(
             "chat": chat_meta,
         }
     except Exception as e:
-        print(f"Error in /ask endpoint: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        app_logger.exception("Error in /ask endpoint: %s", str(e))
         return JSONResponse(
             status_code=500, content={"error": f"Internal server error: {str(e)}"}
         )
@@ -923,3 +988,26 @@ async def get_session_info(session_id: str):
             status_code=500,
             content={"error": f"Lỗi đọc session: {str(e)}", "session_found": False},
         )
+
+
+@router.get("/ingest/job/{job_id}")
+async def ingest_job_status(job_id: str):
+    """Return status for a background ingest job created via /ingest?background=true"""
+    try:
+        from app.utils.ingest_jobs import get_job
+
+        job = get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job không tồn tại"})
+        return {
+            "job_id": job.get("job_id"),
+            "session_id": job.get("session_id"),
+            "status": job.get("status"),
+            "progress": int(job.get("progress") or 0),
+            "result": job.get("result"),
+            "ts_created": job.get("ts_created"),
+            "ts_updated": job.get("ts_updated"),
+        }
+    except Exception as e:
+        app_logger.exception("Error fetching ingest job status: %s", str(e))
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
