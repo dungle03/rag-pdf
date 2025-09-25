@@ -4,40 +4,8 @@
 
 ---
 
-## 🔔 Các cập nhật gần đây (25/09/2025)
 
-Những thay đổi nhỏ nhưng hữu ích đã được triển khai vào repository để làm cho hệ thống ổn định hơn khi chạy local và dễ vận hành hơn:
 
-- Tăng độ bền của generator (LLM): xử lý an toàn các response bất thường từ Google Generative API (Gemini). Nếu response không có phần text như mong đợi, hệ thống sẽ cố gắng fallback vào `candidates`, log thông tin chặn/phân tích và trả về thông báo thân thiện thay vì crash (HTTP 500).
-- Structured logging: thay thế các `print()` bằng `app.utils.logger` để dễ dàng lọc và phân tích log (file logs/ với format có cấu trúc).
-- Chuẩn hóa `session_id`: thêm hàm xác thực/normalize để ngăn path traversal và các session id không hợp lệ.
-- Ingest nền (PoC): `/ingest` hỗ trợ tham số `background=true` để enqueue một job ingest nền và trả về `job_id` ngay lập tức (không block client).
-- Job persistence: job metadata bây giờ được lưu vĩnh viễn bằng SQLite (`./storage/ingest_jobs.sqlite`). Điều này giúp trạng thái job không bị mất khi server restart.
-- Job status endpoint: thêm API `GET /ingest/job/{job_id}` để client có thể poll tiến độ (status, progress, result, timestamps).
-- Dev ergonomics: cập nhật `.env.example` để khuyến nghị `VECTOR_STORE=chroma` trên Windows và thêm biến `INGEST_JOBS_DB=./storage/ingest_jobs.sqlite`.
-- Metrics PoC: thêm script `scripts/collect_metrics.py` để in nhanh số lượng entries trong các SQLite cache (answer/embed) khi cần kiểm tra nhanh.
-- Smoke test: có `tests/simple_test.py` để chạy end-to-end (upload → ingest → ask). Trên môi trường dev hiện tại test này đã PASS (accuracy 100% trên bộ test mẫu). Xem phần Testing & Evaluation phía dưới.
-
-Ví dụ nhanh - ingest nền và poll trạng thái:
-
-1) Khởi tạo ingest nền (trả về job_id)
-
-```bash
-curl -X POST "http://127.0.0.1:8000/ingest" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "session_id=test-session&ocr=false&background=true"
-```
-
-2) Poll trạng thái job (thay `job-...` bằng job_id nhận được):
-
-```bash
-curl http://127.0.0.1:8000/ingest/job/job-1758778338402
-# => {"job_id":"job-...","status":"pending","progress":10,"result":null,...}
-```
-
-Lưu ý vận hành nhanh:
-- SQLite là lựa chọn đơn giản, phù hợp dev và workloads nhỏ; nếu cần scale/throughput lớn hơn, cân nhắc Redis + worker queue (RQ/Celery) và một job worker process.
-- Hiện `result` được lưu dạng JSON trong column text; tránh lưu payload quá lớn ở trường `result`.
 
 
 ## 🌟 Giới thiệu tổng quan
@@ -177,6 +145,8 @@ graph TB
 - **Text chunking thông minh**: Token-aware splitting (**300-500 tokens**, overlap **10-15%**)
 - **Noise removal**: Tự động phát hiện và loại bỏ header/footer lặp lại
 - **Session isolation**: Mỗi người dùng có workspace riêng biệt
+
+- **Session normalization & validation**: `session_id` được chuẩn hóa và kiểm tra để ngăn path traversal và các giá trị không hợp lệ, giúp an toàn hơn khi lưu file theo session.
 - **Chịu lỗi từng file**: Nếu một PDF vi phạm giới hạn hoặc sai định dạng, các file hợp lệ vẫn được lưu và hiển thị thông báo chi tiết.
 - **Xoá tài liệu an toàn**: Cho phép gỡ từng PDF khỏi session; manifest và vector store được thiết lập lại để tránh sót dữ liệu cũ.
 
@@ -199,6 +169,7 @@ graph TB
 - **Confidence Scoring**: Tính toán độ tin cậy dựa trên vector similarity
 - **Temperature Control**: `temperature=0.1` cho output ổn định
 - **Thông báo lỗi rõ ràng**: Giám sát phản hồi Gemini để phát hiện prompt bị chặn/quá quota và phản hồi thân thiện cho người dùng.
+- **Robust generation parsing**: Hệ thống đã cải tiến để xử lý các response bất thường từ Gemini (fallback sang `candidates` khi `text` không khả dụng). Thay vì crash, API trả về thông báo thân thiện và ghi log chi tiết để debug.
 
 ### 💬 Quản lý hội thoại đa phiên
 - **Mỗi chat = một session độc lập**: Khi tạo cuộc trò chuyện mới, hệ thống phát sinh session riêng, cô lập hoàn toàn lịch sử hội thoại và tài liệu.
