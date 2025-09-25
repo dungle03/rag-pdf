@@ -675,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     renderChatList();
-    showToast('Đã xoá cuộc trò chuyện', 'success');
+    showToast('Đã xoá tài liệu và cập nhật dữ liệu liên quan.', 'success');
   };
 
   const renderFileList = () => {
@@ -935,7 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      showToast('Đã xoá tài liệu. Vui lòng xử lý lại để cập nhật vector.', 'info');
+      showToast('Đã xoá tài liệu và cập nhật dữ liệu liên quan.', 'success');
     } catch (error) {
       showToast(error.message, 'error');
     } finally {

@@ -308,7 +308,9 @@ async def ingest(session_id: str = Form(...), ocr: bool = Form(False)):
             continue
 
         # 1) Load PDF (OCR nếu cần)
-        pages = load_pdf(fpath, ocr=bool(ocr), ocr_lang="vie+eng")
+        with open(fpath, "rb") as pdf_file:
+            pdf_bytes = pdf_file.read()
+        pages = load_pdf(pdf_bytes, ocr=bool(ocr), ocr_lang="vie+eng")
 
         # 2) Chunk token-aware
         chunks = chunk_pages(
@@ -418,8 +420,11 @@ async def delete_uploaded_file(session_id: str, doc_name: str):
             status_code=500, content={"error": f"Không thể xoá file: {str(e)}"}
         )
 
+    store = get_store(session_id)
+    removed_vectors = store.remove_doc(safe_name)
+
     manifest_path = os.path.join(folder, MANIFEST_NAME)
-    manifest = {
+    manifest: dict = {
         "session_id": session_id,
         "docs": [],
         "total_chunks": 0,
@@ -432,17 +437,18 @@ async def delete_uploaded_file(session_id: str, doc_name: str):
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 existing = json.load(f)
-            manifest.update({k: existing.get(k, manifest.get(k)) for k in manifest})
-            manifest["docs"] = []
-            manifest["total_chunks"] = 0
-            manifest["ts"] = int(time.time())
+            manifest.update(existing)
         except Exception:
             pass
 
+    docs_before = manifest.get("docs", []) or []
+    docs_after = [doc for doc in docs_before if doc.get("doc") != safe_name]
+    manifest["docs"] = docs_after
+    manifest["total_chunks"] = sum(d.get("chunks", 0) for d in docs_after)
+    manifest["ts"] = int(time.time())
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-
-    drop_store(session_id)
 
     try:
         snapshot = _session_snapshot(session_id)
@@ -457,7 +463,12 @@ async def delete_uploaded_file(session_id: str, doc_name: str):
             "chats": [],
         }
 
-    return {"deleted": True, "doc": safe_name, "session": snapshot}
+    return {
+        "deleted": True,
+        "doc": safe_name,
+        "removed_vectors": removed_vectors,
+        "session": snapshot,
+    }
 
 
 @router.post("/ask")

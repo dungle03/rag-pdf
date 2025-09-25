@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Dict
 import numpy as np
 import faiss
 import os
@@ -19,6 +19,7 @@ class VSItem:
 class FAISSStore:
     def __init__(self, db_path: str, dim: int):
         self.db_path = db_path
+        self._dim = dim
         # dùng inner product (đã chuẩn hoá = cosine)
         self.index = faiss.IndexFlatIP(dim)
         self.items: List[VSItem] = []
@@ -27,8 +28,8 @@ class FAISSStore:
         if os.path.exists(db_path):
             print(f"Tải index từ {db_path}")
             self.index = faiss.read_index(db_path)
-            # cố gắng tải metadata items nếu có
-            self._try_load_items_from_disk()
+            self._dim = self.index.d
+        self._ensure_items_loaded()
 
     def _items_file_path(self) -> str:
         folder = os.path.dirname(self.db_path)
@@ -68,6 +69,14 @@ class FAISSStore:
         except Exception as e:
             print(f"Lỗi tải items metadata: {e}")
 
+    def _ensure_items_loaded(self):
+        if self.index.ntotal == 0:
+            self.items = []
+            self.docs_set = set()
+            return
+        if not self.items or len(self.items) < int(self.index.ntotal):
+            self._try_load_items_from_disk()
+
     @property
     def dim(self) -> int:
         return self.index.d
@@ -84,6 +93,7 @@ class FAISSStore:
                     f"Dim mismatch: rebuilding index {self.index.d} -> {vectors.shape[1]}"
                 )
                 self.index = faiss.IndexFlatIP(int(vectors.shape[1]))
+                self._dim = int(vectors.shape[1])
             else:
                 raise ValueError(
                     f"Embedding dim {vectors.shape[1]} != index dim {self.index.d}. Cannot add to non-empty index."
@@ -102,8 +112,17 @@ class FAISSStore:
             )
             self.docs_set.add(c.doc_name)
 
-        # persist items metadata to disk for future runs
+        self._persist_items()
+
+    def _persist_items(self):
         items_path = self._items_file_path()
+        if not self.items:
+            try:
+                if os.path.exists(items_path):
+                    os.remove(items_path)
+            except Exception as e:
+                print(f"Lỗi xoá metadata items: {e}")
+            return
         try:
             with open(items_path, "w", encoding="utf-8") as w:
                 for it in self.items:
@@ -190,12 +209,47 @@ class FAISSStore:
         return out
 
     def list_docs(self):
+        self._ensure_items_loaded()
         return sorted(self.docs_set)
 
     def clear(self):
         self.index.reset()
         self.items.clear()
         self.docs_set = set()
+
+    def _rebuild_index_from_items(self):
+        if self.items:
+            mat = np.vstack([it.vec for it in self.items]).astype("float32")
+            dim = mat.shape[1]
+            self._dim = dim
+            self.index = faiss.IndexFlatIP(dim)
+            self.index.add(mat)
+            faiss.write_index(self.index, self.db_path)
+            print(f"Đã cập nhật index sau khi xoá tài liệu: {self.db_path}")
+        else:
+            self.index = faiss.IndexFlatIP(self._dim)
+            self.index.reset()
+            try:
+                if os.path.exists(self.db_path):
+                    os.remove(self.db_path)
+            except Exception as e:
+                print(f"Lỗi xoá index file: {e}")
+
+    def remove_doc(self, doc_name: str) -> int:
+        self._ensure_items_loaded()
+        if not doc_name or doc_name not in self.docs_set:
+            return 0
+
+        remaining = [item for item in self.items if item.meta.get("doc") != doc_name]
+        removed = len(self.items) - len(remaining)
+        if removed == 0:
+            return 0
+
+        self.items = remaining
+        self.docs_set = {it.meta.get("doc") for it in self.items if it.meta.get("doc")}
+        self._rebuild_index_from_items()
+        self._persist_items()
+        return removed
 
 
 # Singleton store (khởi tạo lazy sau khi biết dim)
