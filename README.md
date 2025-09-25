@@ -144,7 +144,7 @@ graph TB
 - **OCR tích hợp**: Xử lý tài liệu scan/ảnh với **Tesseract OCR** (vie+eng)
 - **Text chunking thông minh**: Token-aware splitting (**300-500 tokens**, overlap **10-15%**)
 - **Noise removal**: Tự động phát hiện và loại bỏ header/footer lặp lại
-- **Session isolation**: Mỗi người dùng có workspace riêng biệt
+- **Session isolation**: Mỗi đoạn chat có workspace riêng biệt
 
 - **Session normalization & validation**: `session_id` được chuẩn hóa và kiểm tra để ngăn path traversal và các giá trị không hợp lệ, giúp an toàn hơn khi lưu file theo session.
 - **Chịu lỗi từng file**: Nếu một PDF vi phạm giới hạn hoặc sai định dạng, các file hợp lệ vẫn được lưu và hiển thị thông báo chi tiết.
