@@ -17,8 +17,8 @@ SYSTEM_PROMPT = (
     "📋 BỐ CỤC TRẢ LỜI:\n"
     "1. 🎯 Kết luận: 1–3 câu trả lời trực tiếp, có [tên_file.pdf:trang].\n"
     "2. 📚 Dẫn chứng: 1–3 bullet dẫn chứng quan trọng, mỗi bullet kèm [tên_file.pdf:trang].\n"
-    "3. 📝 Phân tích: Giải thích ngắn gọn hơn nếu cần, chỉ thông tin sát câu hỏi.\n"
-    "4. ⚠️ Lưu ý/Khuyến nghị: Nêu hạn chế hoặc gợi ý hành động tiếp theo (nếu có).\n"
+    # "3. 📝 Phân tích: Giải thích ngắn gọn hơn nếu cần, chỉ thông tin sát câu hỏi.\n"
+    "3. ⚠️ Lưu ý/Khuyến nghị: Nêu hạn chế hoặc gợi ý hành động tiếp theo (nếu có).\n"
     "📌 QUY TẮC:\n"
     "• Không bịa đặt; nếu thiếu dữ liệu, trả lời: 'Xin lỗi, không tìm thấy thông tin phù hợp trong tài liệu hiện có.'\n"
     "• Chỉ dùng thông tin từ tài liệu; không thêm kiến thức ngoài.\n"
@@ -101,9 +101,17 @@ Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
         raise RuntimeError(f"Yêu cầu bị từ chối: {feedback.block_reason}")
 
     answer = ""
-    if hasattr(resp, "text") and resp.text:
-        answer = resp.text.strip()
-    elif getattr(resp, "candidates", None):
+    resp_text_error: str | None = None
+    # resp.text accessor may raise ValueError if the response doesn't contain Part objects
+    try:
+        if hasattr(resp, "text") and resp.text:
+            answer = resp.text.strip()
+    except ValueError as e:
+        # keep the error message for debugging / fallback behavior
+        resp_text_error = str(e)
+
+    # Fallback: try to extract from candidates (older or alternate response shape)
+    if not answer and getattr(resp, "candidates", None):
         for candidate in resp.candidates:
             parts = getattr(getattr(candidate, "content", None), "parts", [])
             texts = [p.text for p in parts if getattr(p, "text", None)]
@@ -111,8 +119,30 @@ Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
                 answer = "\n".join(texts).strip()
                 if answer:
                     break
+
+    # If still empty, handle gracefully (do not raise unhandled exception)
     if not answer:
-        raise RuntimeError("Không nhận được phản hồi từ mô hình.")
+        feedback = getattr(resp, "prompt_feedback", None)
+        block_reason = getattr(feedback, "block_reason", None) if feedback else None
+        # Provide a friendly fallback message rather than raising an internal error
+        if block_reason:
+            answer = (
+                "Xin lỗi, yêu cầu của bạn bị mô hình từ chối do chính sách nội dung. "
+                "Vui lòng thử diễn đạt lại câu hỏi hoặc giảm bớt nội dung nhạy cảm."
+            )
+        else:
+            # If we captured a resp.text error, include a short hint for debugging in logs
+            if resp_text_error:
+                # Avoid exposing internal exception to end user; keep a generic message
+                answer = (
+                    "Xin lỗi, mô hình không trả về nội dung hợp lệ. Vui lòng thử lại sau hoặc "
+                    "chỉnh sửa câu hỏi. (response parsing fallback)"
+                )
+            else:
+                answer = (
+                    "Xin lỗi, mô hình không trả về nội dung. Vui lòng thử lại sau hoặc "
+                    "chỉnh sửa câu hỏi."
+                )
 
     if passages:
         scores = [_sigmoid(p.score) for p in passages]
