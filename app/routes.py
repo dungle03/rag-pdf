@@ -597,6 +597,20 @@ async def ask(
         MIN_CONTEXT_PROB = get_float("ANSWER_MIN_CONTEXT_PROB", 0.3)
         MIN_DIRECT_PROB = get_float("ANSWER_MIN_DIRECT_PROB", 0.2)
 
+        # Special config for summary queries
+        is_summary_query = any(
+            word in query.lower()
+            for word in [
+                "tóm tắt",
+                "tổng kết",
+                "summary",
+                "summarize",
+                "tóm tắt nội dung",
+            ]
+        )
+        if is_summary_query:
+            CONTEXT_K = max(CONTEXT_K, 12)  # Increase context for summaries
+
         # Chuẩn bị thông tin cho cache
         store = get_store(session_id=session_id)
         available_docs = store.list_docs()
@@ -632,7 +646,6 @@ async def ask(
                     "chat_id": chat_id_value,
                     "chat": chat_meta,
                 }
-
         # 1) Embed query
         app_logger.info("Embedding query...")
         qvec = embed_texts([query])[0]
@@ -694,6 +707,25 @@ async def ask(
             meta["relevance"] = prob
             chunk.meta = meta
             qualified.append(chunk)
+
+        # Special handling for summary queries: lower threshold or force include top chunks
+        is_summary_query = any(
+            word in query.lower()
+            for word in [
+                "tóm tắt",
+                "tổng kết",
+                "summary",
+                "summarize",
+                "tóm tắt nội dung",
+            ]
+        )
+        if is_summary_query and not qualified and passages:
+            # For summary queries, include top passages even if prob is low
+            qualified = passages[:CONTEXT_K]
+            for chunk in qualified:
+                meta = dict(chunk.meta or {})
+                meta["relevance"] = _chunk_probability(chunk)  # Recalculate if needed
+                chunk.meta = meta
 
         if not qualified:
             if best_chunk and best_prob >= MIN_DIRECT_PROB:

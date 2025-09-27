@@ -70,8 +70,32 @@ def generate(query: str, passages: List[Chunk]) -> Tuple[str, float]:
     _ensure_init()
     context = _build_context(passages)
 
+    # Adjust max output for summary queries
+    is_summary = any(
+        word in query.lower()
+        for word in ["tóm tắt", "tổng kết", "summary", "summarize", "tóm tắt nội dung"]
+    )
+    max_out = MAX_OUT * 2 if is_summary else MAX_OUT  # Double for summaries
+
     # Prompt tối ưu cho format đẹp và câu trả lời đầy đủ
-    prompt = f"""{SYSTEM_PROMPT}
+    if is_summary:
+        prompt = f"""{SYSTEM_PROMPT}
+
+=== THÔNG TIN TỪ TÀI LIỆU ===
+{context}
+
+=== CÂU HỎI ===
+{query}
+
+=== YÊU CẦU ===
+Hãy tóm tắt CHI TIẾT và THÔNG MINH nội dung từ các tài liệu, bao gồm:
+- **Tóm tắt tổng quát**: Nội dung chính của từng file.
+- **Điểm quan trọng**: Liệt kê các điểm chính, số liệu, quy trình từ mỗi file.
+- **So sánh nếu có**: Nếu nhiều file, so sánh nội dung liên quan.
+- **Kết luận**: Tóm tắt chung.
+Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], và đảm bảo đầy đủ thông tin."""
+    else:
+        prompt = f"""{SYSTEM_PROMPT}
 
 === THÔNG TIN TỪ TÀI LIỆU ===
 {context}
@@ -91,7 +115,7 @@ Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
         LLM_MODEL,
         generation_config={
             "temperature": TEMP,
-            "max_output_tokens": MAX_OUT,
+            "max_output_tokens": max_out,
             "candidate_count": 1,
         },
     )

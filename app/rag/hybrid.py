@@ -48,6 +48,16 @@ def hybrid_retrieve(
     if not cand_ids:
         return []
 
+    # Check embedding dimension consistency
+    if store.items and query_vec.shape[0] != store.items[0].vec.shape[0]:
+        query_dim = query_vec.shape[0]
+        store_dim = store.items[0].vec.shape[0]
+        raise ValueError(
+            f"Embedding dimension mismatch: query_dim={query_dim} != store_dim={store_dim}. "
+            "This usually happens when the embedding model changed after documents were ingested. "
+            "Please re-ingest the documents (or clear the vector store) so all embeddings share the same dimension."
+        )
+
     # 1) Dense sims (cosine), đã L2 nên dot = cosine in [-1,1] → map về [0,1]
     dense_sims = np.array(
         [float(store.items[i].vec @ query_vec) for i in cand_ids], dtype=np.float32
