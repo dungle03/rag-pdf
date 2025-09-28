@@ -37,7 +37,7 @@ flowchart LR
     U -- "❓ Query" --> Q["🔍 FastAPI /ask"]
     Q --> R1["🔎 Hybrid Retrieve<br/>BM25 + Vector"]
     R1 --> R2["🎯 Rerank<br/>BGE CrossEncoder"]
-    R2 --> G["✨ Gemini 1.5 Flash<br/>RAG prompts"]
+    R2 --> G["✨ Gemini 2.0 Flash<br/>RAG prompts"]
     G --> A["📋 Answer + Citations<br/>[doc:page] format"]
     A --> U
     
@@ -66,7 +66,7 @@ graph TB
         VECTOR["💾 Vector Database<br/>FAISS IndexFlatIP"]
         SEARCH["🔍 Hybrid Retrieval<br/>BM25 + Vector + MMR"]
         RERANK["🎯 Cross-Encoder<br/>BGE reranker"]
-        GEN["✨ LLM Generator<br/>Gemini 1.5 Flash"]
+        GEN["✨ LLM Generator<br/>Gemini 2.0 Flash"]
     end
     
     subgraph Storage["💾 Storage & Cache"]
@@ -111,7 +111,7 @@ graph TB
 #### 🤖 AI & Machine Learning Stack
 - **Google Gemini API**: 
   - `text-embedding-004` (768 dimensions) cho vector embeddings
-  - `gemini-1.5-flash` cho text generation với context window lớn
+  - `gemini-2.0-flash-001` cho text generation với context window lớn
 - **FAISS**: Facebook AI Similarity Search - vector database tối ưu cho cosine similarity
 - **BGE Reranker**: BAAI/bge-reranker-base cross-encoder cho re-ranking precision
 - **BM25**: Sparse retrieval algorithm cho keyword matching
@@ -162,7 +162,7 @@ graph TB
   - `MMR_LAMBDA=0.5` diversity factor
 
 ### 🧠 Sinh câu trả lời thông minh
-- **Context-aware Generation**: Sử dụng **Gemini 1.5 Flash** với prompt engineering
+- **Context-aware Generation**: Sử dụng **Gemini 2.0 Flash** với prompt engineering
 - **Mandatory Citations**: Bắt buộc format **[doc:page]** cho mọi thông tin trích dẫn
 - **Guardrail System**: `GENERATE_MIN_SIM=0.20` để tránh hallucination
 - **Vietnamese Optimization**: Prompt được tối ưu cho tiếng Việt
@@ -253,7 +253,7 @@ Chỉnh sửa file `.env` với cấu hình đầy đủ:
 # === AI Models Configuration ===
 GEMINI_API_KEY=your_actual_api_key_here
 RAG_EMBED_MODEL=text-embedding-004
-RAG_LLM_MODEL=gemini-1.5-flash
+RAG_LLM_MODEL=gemini-2.0-flash-001
 EMBED_DIM=768
 
 # === Retrieval & Search Settings ===
@@ -487,7 +487,7 @@ rag-pdf/
 │   │   ├── vectorstore.py        # FAISS wrapper: IndexFlatIP + MMR + persistence
 │   │   ├── hybrid.py             # BM25 + Vector fusion + diversity ranking
 │   │   ├── rerank.py             # BGE cross-encoder reranking (optional)
-│   │   ├── generator.py          # Gemini 1.5 Flash + citation-aware prompts
+│   │   ├── generator.py          # Gemini 2.0 Flash + citation-aware prompts
 │   │   ├── answer_cache.py       # SQLite-based answer caching
 │   │   └── cache.py              # Embedding cache utilities
 │   └── utils/                    # 🛠️ Production Utilities
@@ -630,7 +630,7 @@ Phiên bản 2.1 tập trung vào việc nâng cao khả năng suy luận và lo
 #### 🧠 Advanced Generation Parameters
 - **Temperature tăng**: Từ 0.1 lên 0.3 để khuyến khích suy luận sáng tạo
 - **Max tokens tăng**: Từ 256 lên 1024 để hỗ trợ câu trả lời chi tiết
-- **Model nâng cấp**: Từ gemini-2.0-flash-lite lên gemini-1.5-flash cho khả năng suy luận tốt hơn
+- **Model nâng cấp**: Từ gemini-2.0-flash-lite lên gemini-2.0-flash-001 cho khả năng suy luận tốt hơn
 
 #### 📊 Performance Optimizations
 - **Context tuning**: Giảm CONTEXT_K từ 16 xuống 10 để tránh context quá dài
