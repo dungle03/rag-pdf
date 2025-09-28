@@ -645,6 +645,7 @@ async def ask(
                     "cached": True,
                     "chat_id": chat_id_value,
                     "chat": chat_meta,
+                    "format": "markdown",
                 }
         # 1) Embed query
         app_logger.info("Embedding query...")
@@ -760,6 +761,7 @@ async def ask(
                     "latency_ms": latency,
                     "chat_id": chat_id_value,
                     "chat": chat_meta,
+                    "format": "markdown",
                 }
 
         passages = sorted(
@@ -814,6 +816,7 @@ async def ask(
             "latency_ms": latency,
             "chat_id": chat_id_value,
             "chat": chat_meta,
+            "format": "markdown",
         }
     except Exception as e:
         app_logger.exception("Error in /ask endpoint: %s", str(e))

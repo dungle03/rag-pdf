@@ -160,7 +160,13 @@ def generate(query: str, passages: List[Chunk]) -> Tuple[str, float]:
     question_type = _detect_question_type(query)
     reasoning_guide = _get_reasoning_guide(question_type)
 
-    # Enhanced prompt based on question type
+    # Enhanced prompt: yêu cầu không lặp lại citation giống nhau liên tục
+    citation_note = (
+        "\n\n**Lưu ý về trích dẫn:**\n"
+        "- Chỉ chèn trích dẫn [tên_file.pdf:trang] ở cuối đoạn hoặc bullet lớn nhất, không lặp lại cùng một trích dẫn nhiều lần liên tiếp trong cùng một đoạn hoặc danh sách.\n"
+        "- Nếu nhiều ý trong cùng đoạn/bullet cùng nguồn, chỉ cần citation ở cuối đoạn/bullet đó.\n"
+        "- Không chèn citation sau từng câu nhỏ nếu cùng nguồn.\n"
+    )
     if is_summary:
         prompt = f"""{SYSTEM_PROMPT}
 
@@ -182,7 +188,8 @@ Hãy suy luận thông minh để tóm tắt:
 - **Điểm quan trọng**: Liệt kê các điểm chính, số liệu, quy trình CỤ THỂ và chi tiết.
 - **So sánh nếu có**: Đối chiếu nội dung liên quan giữa các file một cách CHI TIẾT.
 - **Kết luận**: Tóm tắt chung với logic rõ ràng và đầy đủ thông tin.
-Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], đảm bảo logic và đầy đủ."""
+Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], đảm bảo logic và đầy đủ.
+{citation_note}"""
     else:
         prompt = f"""{SYSTEM_PROMPT}
 
@@ -200,7 +207,8 @@ Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], đảm b�
 - **Dẫn chứng**: 2-4 điểm chính từ tài liệu với giải thích đầy đủ, kèm [tên_file.pdf:trang].
 - **Phân tích** (nếu cần): Giải thích logic chi tiết, so sánh nếu có nhiều thông tin.
 - **Khuyến nghị** (nếu phù hợp): Hành động tiếp theo hoặc lưu ý CỤ THỂ.
-Sử dụng markdown, trích dẫn chính xác, đảm bảo logic và đầy đủ."""
+Sử dụng markdown, trích dẫn chính xác, đảm bảo logic và đầy đủ.
+{citation_note}"""
 
     model = genai.GenerativeModel(
         LLM_MODEL,

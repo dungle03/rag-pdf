@@ -492,15 +492,14 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSessionMeta();
   };
 
+  // Sử dụng marked.js để render markdown an toàn
   const formatTextContent = (text) => {
     if (!text) return '';
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/^• /gm, '&nbsp;&nbsp;• ')
-      .replace(/\n\n/g, '<br><br>')
-      .replace(/\n/g, '<br>')
-      .replace(/(<br><br>)/g, '<br><br>')
-      .replace(/\[([^\]]+)\]/g, '<span class="citation-ref">[$1]</span>');
+    // Render markdown sang HTML
+    let html = marked.parse(text, { breaks: true });
+    // Highlight citation refs dạng [filename:page] nếu có
+    html = html.replace(/\[([^\[\]]+?\.pdf:\d+)\]/g, '<span class="citation-ref">[$1]</span>');
+    return html;
   };
 
   const updateKnowledgePanel = (chat) => {

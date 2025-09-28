@@ -650,10 +650,47 @@ body {
 
 .chat-bubble {
   max-width: 80%;
-  padding: 0.75rem 1.25rem;
+  padding: 0.5rem 0.9rem;
   border-radius: 1.25rem;
-  margin-bottom: 1rem;
-  line-height: 1.6;
+  margin-bottom: 0.2rem;
+  line-height: 1.5;
+}
+
+/* Tối ưu markdown trong chat-bubble */
+.chat-bubble p {
+  margin: 0.1em 0 0.2em 0;
+  padding: 0;
+}
+
+.chat-bubble ul,
+.chat-bubble ol {
+  margin: 0.1em 0 0.2em 1.1em;
+  padding-left: 1.1em;
+}
+
+.chat-bubble li {
+  margin: 0.05em 0;
+  padding: 0;
+}
+
+.chat-bubble h1,
+.chat-bubble h2,
+.chat-bubble h3 {
+  margin: 0.4em 0 0.5em 0;
+  padding: 0;
+  font-weight: 600;
+}
+
+.chat-bubble h1 {
+  font-size: 1.3em;
+}
+
+.chat-bubble h2 {
+  font-size: 1.15em;
+}
+
+.chat-bubble h3 {
+  font-size: 1.05em;
 }
 
 .chat-bubble.user {
@@ -663,27 +700,31 @@ body {
   margin-left: auto;
 }
 
-.chat-bubble.ai {
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-bottom-left-radius: 0.25rem;
-  margin-right: auto;
-  white-space: pre-line;
-  /* Preserve line breaks */
-  word-wrap: break-word;
+.chat-bubble h1,
+.chat-bubble h2,
+.chat-bubble h3 {
+  margin: 0.15em 0 0.18em 0;
+  padding: 0;
+  font-weight: 600;
 }
 
-/* Citation reference styling */
-.citation-ref {
-  background-color: var(--primary-color);
-  color: white;
-  padding: 0.1rem 0.3rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  margin: 0 0.2rem;
-  display: inline-block;
+.chat-bubble h1 {
+  font-size: 1.13em;
+}
+
+.chat-bubble h2 {
+  font-size: 1.07em;
+}
+
+.chat-bubble h3 {
+  font-size: 1.03em;
+}
+
+border-radius: 4px;
+font-size: 0.8rem;
+font-weight: 500;
+margin: 0 0.2rem;
+display: inline-block;
 }
 
 /* Better text formatting in chat bubbles */
@@ -824,14 +865,27 @@ body {
   background-color: var(--bg-tertiary);
 }
 
-.citation-tag {
+.citation-ref {
   background-color: var(--primary-color);
-  color: white;
-  padding: 0.2rem 0.5rem;
-  border-radius: 6px;
+  color: #fff;
+  padding: 0.04em 0.38em;
+  border-radius: 3px;
+  font-size: 0.74em;
   font-weight: 500;
+  margin-left: 0.18em;
+  margin-right: 0.05em;
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1.2;
+  transition: background 0.2s, color 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   cursor: pointer;
-  font-size: 0.8rem;
+}
+
+.citation-ref:hover {
+  background-color: #1d4ed8;
+  color: #fff;
+  text-decoration: underline;
 }
 
 .citation-tag:hover {
