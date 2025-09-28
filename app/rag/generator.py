@@ -6,26 +6,27 @@ import google.generativeai as genai
 from app.utils.schema import Chunk
 from app.utils.logger import rag_logger
 
-LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gemini-1.5-flash")
-TEMP = float(os.getenv("GEN_TEMPERATURE", "0.1"))
+LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gemini-2.0-flash-001")
+TEMP = float(os.getenv("GEN_TEMPERATURE", "0.3"))
 MAX_OUT = int(
-    os.getenv("GEN_MAX_OUTPUT_TOKENS", "768")
-)  # Cân bằng: 768 tokens đủ chi tiết nhưng tiết kiệm hơn 1024
+    os.getenv("GEN_MAX_OUTPUT_TOKENS", "1024")
+)  # Tăng để hỗ trợ suy luận chi tiết hơn
 
 SYSTEM_PROMPT = (
-    "Bạn là trợ lý RAG, trả lời bằng tiếng Việt dựa 100% trên NỘI DUNG TÀI LIỆU. "
-    "Luôn so sánh câu hỏi với ngữ cảnh và chỉ sử dụng thông tin liên quan.\n"
-    "📋 BỐ CỤC TRẢ LỜI:\n"
-    "1. 🎯 Kết luận: 1–3 câu trả lời trực tiếp, có [tên_file.pdf:trang].\n"
-    "2. 📚 Dẫn chứng: 1–3 bullet dẫn chứng quan trọng, mỗi bullet kèm [tên_file.pdf:trang].\n"
-    # "3. 📝 Phân tích: Giải thích ngắn gọn hơn nếu cần, chỉ thông tin sát câu hỏi.\n"
-    "3. ⚠️ Lưu ý/Khuyến nghị: Nêu hạn chế hoặc gợi ý hành động tiếp theo (nếu có).\n"
+    "Bạn là trợ lý RAG thông minh, trả lời bằng tiếng Việt dựa 100% trên NỘI DUNG TÀI LIỆU. "
+    "Luôn suy luận LOGIC và THÔNG MINH dựa trên dẫn chứng từ tài liệu.\n"
+    "📋 QUY TRÌNH SUY LUẬN:\n"
+    "1. 🔍 Phân tích câu hỏi: Xác định ý chính, loại câu hỏi (thực tế, so sánh, quy trình, định nghĩa).\n"
+    "2. 🕵️‍♂️ Tìm kiếm dẫn chứng: So khớp thông tin từ tài liệu với câu hỏi.\n"
+    "3. 🧠 Suy luận logic: Kết nối thông tin, so sánh nếu cần, loại bỏ mâu thuẫn.\n"
+    "4. 🎯 Kết luận: Trả lời trực tiếp, rõ ràng, CHI TIẾT và CỤ THỂ.\n"
     "📌 QUY TẮC:\n"
     "• Không bịa đặt; nếu thiếu dữ liệu, trả lời: 'Xin lỗi, không tìm thấy thông tin phù hợp trong tài liệu hiện có.'\n"
     "• Chỉ dùng thông tin từ tài liệu; không thêm kiến thức ngoài.\n"
     "• Khi trích dẫn, ghi đúng tên file và số trang, ví dụ [tb741.pdf:3].\n"
-    "• Không lặp lại câu hỏi, không xin lỗi nhiều lần.\n"
-    "• Trình bày bằng markdown rõ ràng, ngắn gọn, chuyên nghiệp và thân thiện."
+    "• Suy luận từng bước nếu câu hỏi phức tạp, nhưng giữ ngắn gọn.\n"
+    "• Trình bày bằng markdown rõ ràng, chuyên nghiệp và thân thiện.\n"
+    "• **LUÔN TRẢ LỜI CHI TIẾT VÀ CỤ THỂ**: Cung cấp đầy đủ thông tin, ví dụ thực tế, số liệu chính xác, bước thực hiện rõ ràng."
 )
 
 
@@ -66,6 +67,85 @@ def _build_context(passages: List[Chunk]) -> str:
     return "\n\n".join(parts)
 
 
+def _detect_question_type(query: str) -> str:
+    """Detect the type of question for adaptive reasoning."""
+    query_lower = query.lower()
+
+    # Comparison questions
+    if any(
+        word in query_lower
+        for word in ["so sánh", "khác nhau", "khác biệt", "so với", "thế nào"]
+    ):
+        return "comparison"
+
+    # Causal questions
+    if any(
+        word in query_lower
+        for word in ["tại sao", "vì sao", "nguyên nhân", "do", "bởi"]
+    ):
+        return "causal"
+
+    # Procedural questions
+    if any(
+        word in query_lower
+        for word in ["cách", "bước", "quy trình", "làm thế nào", "thực hiện"]
+    ):
+        return "procedural"
+
+    # Definitional questions
+    if any(
+        word in query_lower
+        for word in ["là gì", "định nghĩa", "giải thích", "có nghĩa là"]
+    ):
+        return "definitional"
+
+    # Quantitative questions
+    if any(
+        word in query_lower for word in ["bao nhiêu", "mấy", "số lượng", "phần trăm"]
+    ):
+        return "quantitative"
+
+    return "general"
+
+
+def _get_reasoning_guide(question_type: str) -> str:
+    """Get adaptive reasoning guide based on question type."""
+    guides = {
+        "comparison": """Hãy suy luận để so sánh CHI TIẾT:
+1. **Xác định đối tượng**: Liệt kê các thực thể cần so sánh với mô tả đầy đủ.
+2. **Tìm điểm tương đồng**: Tìm và giải thích các đặc điểm chung một cách cụ thể.
+3. **Tìm điểm khác biệt**: Xác định và phân tích sự khác nhau về đặc điểm, ưu/nhược điểm chi tiết.
+4. **Kết luận**: Tổng hợp so sánh một cách logic với ví dụ cụ thể.""",
+        "causal": """Hãy suy luận về nguyên nhân CHI TIẾT:
+1. **Xác định hiện tượng**: Mô tả vấn đề hoặc kết quả với đầy đủ chi tiết.
+2. **Tìm nguyên nhân trực tiếp**: Tìm và giải thích các yếu tố gây ra trực tiếp với ví dụ.
+3. **Tìm nguyên nhân gián tiếp**: Xem xét và phân tích các yếu tố nền tảng chi tiết.
+4. **Kết luận**: Giải thích mối quan hệ nhân quả với bằng chứng cụ thể.""",
+        "procedural": """Hãy suy luận về quy trình CHI TIẾT:
+1. **Xác định mục tiêu**: Mô tả kết quả mong muốn với đầy đủ chi tiết.
+2. **Liệt kê bước thực hiện**: Tìm và mô tả các bước theo thứ tự logic với hướng dẫn cụ thể.
+3. **Xác định điều kiện**: Lưu ý chi tiết các yêu cầu hoặc điều kiện tiên quyết.
+4. **Kết luận**: Tóm tắt quy trình một cách có hệ thống với ví dụ thực tế.""",
+        "definitional": """Hãy suy luận về định nghĩa CHI TIẾT:
+1. **Xác định khái niệm**: Mô tả đối tượng cần định nghĩa với ngữ cảnh đầy đủ.
+2. **Tìm đặc điểm chính**: Liệt kê và giải thích các thuộc tính quan trọng chi tiết.
+3. **Tìm ví dụ**: Tìm và mô tả minh họa thực tế cụ thể.
+4. **Kết luận**: Đưa ra định nghĩa rõ ràng, đầy đủ với các khía cạnh khác nhau.""",
+        "quantitative": """Hãy suy luận về số lượng CHI TIẾT:
+1. **Xác định chỉ số**: Mô tả dữ liệu cần tìm với ngữ cảnh đầy đủ.
+2. **Tìm số liệu cụ thể**: Trích xuất và phân tích các con số từ tài liệu chi tiết.
+3. **Xác minh tính chính xác**: Kiểm tra nguồn và ngữ cảnh với giải thích cụ thể.
+4. **Kết luận**: Trình bày số liệu với đơn vị, ngữ cảnh và phân tích chi tiết.""",
+        "general": """Hãy suy luận từng bước để trả lời CHI TIẾT và THÔNG MINH:
+1. **Phân tích câu hỏi**: Xác định loại câu hỏi và thông tin cần thiết với phân tích sâu.
+2. **Tìm kiếm dẫn chứng**: Trích xuất và phân tích thông tin liên quan từ tài liệu chi tiết.
+3. **Suy luận logic**: Kết nối thông tin, so sánh nếu có nhiều nguồn, loại bỏ thông tin không liên quan với giải thích.
+4. **Kết luận**: Trả lời trực tiếp, rõ ràng với đầy đủ chi tiết và bằng chứng.""",
+    }
+
+    return guides.get(question_type, guides["general"])
+
+
 def generate(query: str, passages: List[Chunk]) -> Tuple[str, float]:
     _ensure_init()
     context = _build_context(passages)
@@ -77,7 +157,10 @@ def generate(query: str, passages: List[Chunk]) -> Tuple[str, float]:
     )
     max_out = MAX_OUT * 2 if is_summary else MAX_OUT  # Double for summaries
 
-    # Prompt tối ưu cho format đẹp và câu trả lời đầy đủ
+    question_type = _detect_question_type(query)
+    reasoning_guide = _get_reasoning_guide(question_type)
+
+    # Enhanced prompt based on question type
     if is_summary:
         prompt = f"""{SYSTEM_PROMPT}
 
@@ -87,13 +170,19 @@ def generate(query: str, passages: List[Chunk]) -> Tuple[str, float]:
 === CÂU HỎI ===
 {query}
 
-=== YÊU CẦU ===
-Hãy tóm tắt CHI TIẾT và THÔNG MINH nội dung từ các tài liệu, bao gồm:
-- **Tóm tắt tổng quát**: Nội dung chính của từng file.
-- **Điểm quan trọng**: Liệt kê các điểm chính, số liệu, quy trình từ mỗi file.
-- **So sánh nếu có**: Nếu nhiều file, so sánh nội dung liên quan.
-- **Kết luận**: Tóm tắt chung.
-Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], và đảm bảo đầy đủ thông tin."""
+=== HƯỚNG DẪN SUY LUẬN ===
+Hãy suy luận thông minh để tóm tắt:
+1. **Phân tích tổng thể**: Xác định chủ đề chính và mối liên hệ giữa các tài liệu.
+2. **Trích xuất thông tin**: Lấy điểm chính, số liệu, quy trình từ mỗi nguồn.
+3. **So sánh và tổng hợp**: Đối chiếu thông tin, loại bỏ trùng lặp, tạo bản đồ logic.
+4. **Kết luận**: Tóm tắt cô đọng nhưng đầy đủ.
+
+=== YÊU CẦU TRÌNH BÀY ===
+- **Tóm tắt tổng quát**: Nội dung chính của từng file với CHI TIẾT đầy đủ.
+- **Điểm quan trọng**: Liệt kê các điểm chính, số liệu, quy trình CỤ THỂ và chi tiết.
+- **So sánh nếu có**: Đối chiếu nội dung liên quan giữa các file một cách CHI TIẾT.
+- **Kết luận**: Tóm tắt chung với logic rõ ràng và đầy đủ thông tin.
+Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], đảm bảo logic và đầy đủ."""
     else:
         prompt = f"""{SYSTEM_PROMPT}
 
@@ -103,13 +192,15 @@ Sử dụng markdown, trích dẫn chính xác [tên_file.pdf:trang], và đảm
 === CÂU HỎI ===
 {query}
 
-=== YÊU CẦU ===
-Hãy trả lời THEO ĐÚNG CẤU TRÚC trên với:
-- Xuống dòng rõ ràng giữa các phần
-- Sử dụng **bold** cho tiêu đề 
-- Bullet points cho danh sách
-- Trả lời ĐẦY ĐỦ, không được cắt giữa chừng
-- TRÍCH DẪN: Sử dụng tên file CHÍNH XÁC từ context ở trên, ví dụ [tb741.pdf:2] chứ KHÔNG PHẢI [doc:1]"""
+=== HƯỚNG DẪN SUY LUẬN ===
+{reasoning_guide}
+
+=== YÊU CẦU TRÌNH BÀY ===
+- **Kết luận**: Câu trả lời trực tiếp, CHI TIẾT và CỤ THỂ (2-5 câu).
+- **Dẫn chứng**: 2-4 điểm chính từ tài liệu với giải thích đầy đủ, kèm [tên_file.pdf:trang].
+- **Phân tích** (nếu cần): Giải thích logic chi tiết, so sánh nếu có nhiều thông tin.
+- **Khuyến nghị** (nếu phù hợp): Hành động tiếp theo hoặc lưu ý CỤ THỂ.
+Sử dụng markdown, trích dẫn chính xác, đảm bảo logic và đầy đủ."""
 
     model = genai.GenerativeModel(
         LLM_MODEL,

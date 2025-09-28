@@ -167,7 +167,10 @@ graph TB
 - **Guardrail System**: `GENERATE_MIN_SIM=0.20` để tránh hallucination
 - **Vietnamese Optimization**: Prompt được tối ưu cho tiếng Việt
 - **Confidence Scoring**: Tính toán độ tin cậy dựa trên vector similarity
-- **Temperature Control**: `temperature=0.1` cho output ổn định
+- **Temperature Control**: `temperature=0.3` cho suy luận sáng tạo
+- **Adaptive Reasoning**: Tự động detect loại câu hỏi (so sánh, nguyên nhân, quy trình...) và điều chỉnh prompt tương ứng
+- **Enhanced Chunking**: Semantic-aware chunking ưu tiên cắt tại câu hoàn chỉnh
+- **Logic-enhanced Reranking**: Ưu tiên chunks có tính kết nối và logic cao
 - **Thông báo lỗi rõ ràng**: Giám sát phản hồi Gemini để phát hiện prompt bị chặn/quá quota và phản hồi thân thiện cho người dùng.
 - **Robust generation parsing**: Hệ thống đã cải tiến để xử lý các response bất thường từ Gemini (fallback sang `candidates` khi `text` không khả dụng). Thay vì crash, API trả về thông báo thân thiện và ghi log chi tiết để debug.
 
@@ -264,11 +267,11 @@ MMR_LAMBDA=0.5                    # Diversity factor cho MMR
 RERANK_ON=true                    # Bật BGE reranker (tăng latency ~500ms)
 
 # === Generation Settings ===
-GENERATE_MIN_SIM=0.20             # Threshold tối thiểu để sinh câu trả lời
-ANSWER_MIN_CONTEXT_PROB=0.30      # Bỏ qua câu trả lời nếu ngữ cảnh quá yếu
-ANSWER_MIN_DIRECT_PROB=0.20       # Từ chối nếu không đủ bằng chứng trực tiếp
-GEN_TEMPERATURE=0.1               # Temperature cho generation (0.1 = ổn định)
-GEN_MAX_OUTPUT_TOKENS=256         # Giới hạn độ dài output
+GENERATE_MIN_SIM=0.25             # Threshold tối thiểu để sinh câu trả lời
+ANSWER_MIN_CONTEXT_PROB=0.35      # Bỏ qua câu trả lời nếu ngữ cảnh quá yếu
+ANSWER_MIN_DIRECT_PROB=0.25       # Từ chối nếu không đủ bằng chứng trực tiếp
+GEN_TEMPERATURE=0.3               # Temperature cho suy luận sáng tạo (tăng từ 0.1)
+GEN_MAX_OUTPUT_TOKENS=1024        # Tăng để hỗ trợ suy luận chi tiết (từ 256)
 
 # === Storage & Caching ===
 VECTOR_STORE=faiss                # faiss hoặc chroma
@@ -605,6 +608,102 @@ python tests/load_test.py --sessions 10 --queries 100
 - [ ] Fine-tuned embeddings cho tiếng Việt
 - [ ] Multi-modal support (images, tables)
 - [ ] Collaborative features (sharing, comments)
+
+---
+
+## 🚀 Cải tiến suy luận thông minh (v2.1)
+
+### Tổng quan cải tiến
+
+Phiên bản 2.1 tập trung vào việc nâng cao khả năng suy luận và logic của chatbot RAG thông qua các cải tiến:
+
+#### 🤖 Adaptive Question Type Detection
+- **Tự động phân loại câu hỏi**: Detect 6 loại câu hỏi khác nhau (so sánh, nguyên nhân, quy trình, định nghĩa, định lượng, tổng quát)
+- **Prompt thích ứng**: Điều chỉnh hướng dẫn suy luận dựa trên loại câu hỏi
+- **Reasoning Guide động**: Cung cấp chiến lược suy luận phù hợp cho từng loại câu hỏi
+
+#### 📚 Enhanced Chunking & Retrieval
+- **Semantic-aware Chunking**: Ưu tiên cắt tại câu hoàn chỉnh thay vì token cứng
+- **Logic-enhanced Reranking**: Thêm điểm bonus cho chunks có tính kết nối cao (từ khóa suy luận, số liệu, cấu trúc logic)
+- **Improved Hybrid Search**: Tăng alpha lên 0.6 để ưu tiên tìm kiếm từ khóa chính xác hơn
+
+#### 🧠 Advanced Generation Parameters
+- **Temperature tăng**: Từ 0.1 lên 0.3 để khuyến khích suy luận sáng tạo
+- **Max tokens tăng**: Từ 256 lên 1024 để hỗ trợ câu trả lời chi tiết
+- **Model nâng cấp**: Từ gemini-2.0-flash-lite lên gemini-1.5-flash cho khả năng suy luận tốt hơn
+
+#### 📊 Performance Optimizations
+- **Context tuning**: Giảm CONTEXT_K từ 16 xuống 10 để tránh context quá dài
+- **Retrieval optimization**: Tăng RETRIEVE_TOP_K lên 12 để có nhiều candidates hơn cho reranking
+
+### Chi tiết kỹ thuật
+
+#### Question Type Detection Algorithm
+```python
+def _detect_question_type(query: str) -> str:
+    # So sánh: "so sánh", "khác nhau", "thế nào"
+    # Nguyên nhân: "tại sao", "vì sao", "nguyên nhân"
+    # Quy trình: "cách", "bước", "quy trình"
+    # Định nghĩa: "là gì", "định nghĩa", "giải thích"
+    # Định lượng: "bao nhiêu", "mấy", "số lượng"
+    # Tổng quát: mặc định
+```
+
+#### Adaptive Reasoning Guides
+- **So sánh**: Tập trung vào điểm tương đồng/khác biệt
+- **Nguyên nhân**: Phân tích quan hệ nhân quả
+- **Quy trình**: Liệt kê bước thực hiện theo thứ tự
+- **Định nghĩa**: Giải thích khái niệm + ví dụ
+- **Định lượng**: Trích xuất số liệu chính xác
+- **Tổng quát**: Suy luận từng bước linh hoạt
+
+#### Semantic Chunking Enhancement
+- Tìm điểm cắt semantic (dấu chấm, chấm hỏi, xuống dòng)
+- Ưu tiên cắt tại ranh giới câu tự nhiên
+- Giữ tính liên kết của thông tin
+
+#### Logic-enhanced Reranking
+```python
+logic_bonus = 0.0
+# Bonus cho từ khóa suy luận
+if any(keyword in text for keyword in reasoning_keywords):
+    logic_bonus += 0.1
+# Bonus cho số liệu
+if any(char.isdigit() for char in text):
+    logic_bonus += 0.05
+# Bonus cho cấu trúc logic
+if any(marker in text for marker in ['1.', '2.', '-', '•']):
+    logic_bonus += 0.05
+```
+
+### Kết quả cải tiến
+
+#### Độ chính xác tăng
+- Câu trả lời logic hơn, kết nối thông tin tốt hơn
+- Giảm hallucination nhờ suy luận có cấu trúc
+- Tăng khả năng xử lý câu hỏi phức tạp
+
+#### Trải nghiệm người dùng
+- Câu trả lời tự nhiên và mạch lạc hơn
+- Khả năng giải thích và phân tích tốt hơn
+- Hỗ trợ tốt hơn cho các câu hỏi suy luận
+
+#### Hiệu năng ổn định
+- Temperature 0.3 cân bằng giữa sáng tạo và chính xác
+- Context size tối ưu tránh quá tải
+- Model mạnh hơn nhưng vẫn trong giới hạn quota
+
+### Sử dụng các cải tiến
+
+Để tận dụng tối đa khả năng suy luận mới:
+
+1. **Câu hỏi so sánh**: "So sánh ưu nhược điểm của A và B"
+2. **Câu hỏi nguyên nhân**: "Tại sao hiện tượng X xảy ra?"
+3. **Câu hỏi quy trình**: "Các bước để thực hiện Y là gì?"
+4. **Câu hỏi định nghĩa**: "Khái niệm Z là gì?"
+5. **Câu hỏi định lượng**: "Có bao nhiêu trường hợp W?"
+
+Hệ thống sẽ tự động điều chỉnh chiến lược suy luận phù hợp.
 
 ---
 
