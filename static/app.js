@@ -33,6 +33,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const bsToast = new bootstrap.Toast(dom.toastElement);
 
+  if (window.marked) {
+    marked.setOptions({
+      gfm: true,
+      breaks: true,
+      headerIds: false,
+      mangle: false,
+      highlight(code, lang) {
+        if (window.hljs) {
+          try {
+            if (lang && hljs.getLanguage(lang)) {
+              return hljs.highlight(code, { language: lang }).value;
+            }
+            return hljs.highlightAuto(code).value;
+          } catch (err) {
+            console.warn('Highlight.js error:', err);
+          }
+        }
+        return code;
+      },
+    });
+  }
+
   // Initialize modal instances (after DOM loaded)
   const renameModal = dom.renameModalEl ? new bootstrap.Modal(dom.renameModalEl) : null;
   const deleteModal = dom.deleteModalEl ? new bootstrap.Modal(dom.deleteModalEl) : null;
@@ -492,14 +514,363 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSessionMeta();
   };
 
-  // Sử dụng marked.js để render markdown an toàn
-  const formatTextContent = (text) => {
-    if (!text) return '';
-    // Render markdown sang HTML
-    let html = marked.parse(text, { breaks: true });
-    // Highlight citation refs dạng [filename:page] nếu có
-    html = html.replace(/\[([^\[\]]+?\.pdf:\d+)\]/g, '<span class="citation-ref">[$1]</span>');
+  const sanitizeHtml = (html) => {
+    if (window.DOMPurify) {
+      return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    }
     return html;
+  };
+
+  const enhanceMarkdownDom = (container) => {
+    if (!container) return;
+
+    container.querySelectorAll('a[href^="http"]').forEach((link) => {
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+    });
+
+    const firstParagraph = container.querySelector('p');
+    if (firstParagraph) {
+      firstParagraph.classList.add('bubble-lead');
+    }
+
+    container.querySelectorAll('ul').forEach((list) => {
+      list.classList.add('bubble-list');
+      list.querySelectorAll('li').forEach((item) => {
+        item.classList.add('bubble-list-item');
+      });
+    });
+
+    container.querySelectorAll('ol').forEach((list) => {
+      list.classList.add('bubble-ordered');
+    });
+
+    container.querySelectorAll('blockquote').forEach((quote) => {
+      quote.classList.add('bubble-quote');
+    });
+
+    container.querySelectorAll('table').forEach((table) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'bubble-table-wrapper';
+      table.parentNode.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+      table.classList.add('table', 'table-striped', 'table-sm');
+    });
+
+    container.querySelectorAll('pre').forEach((pre) => {
+      pre.classList.add('bubble-code-block');
+    });
+
+    container.querySelectorAll('code:not(pre code)').forEach((code) => {
+      code.classList.add('bubble-inline-code');
+    });
+
+    if (window.hljs) {
+      container.querySelectorAll('pre code').forEach((block) => {
+        hljs.highlightElement(block);
+        if (!block.hasAttribute('tabindex')) {
+          block.setAttribute('tabindex', '0');
+        }
+      });
+    }
+
+    container.querySelectorAll('.citation-ref[data-ref]').forEach((refEl) => {
+      const refValue = refEl.dataset.ref;
+      const citation = parseCitationToken(refValue);
+      if (!citation) return;
+      refEl.setAttribute('role', 'button');
+      refEl.setAttribute('tabindex', '0');
+      refEl.addEventListener('click', () => {
+        highlightSourceReference(citation.filename, citation.page);
+      });
+      refEl.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          highlightSourceReference(citation.filename, citation.page);
+        }
+      });
+    });
+  };
+
+  const buildMarkdownContent = (markdown) => {
+    const raw = typeof marked !== 'undefined' ? marked.parse(markdown || '') : (markdown || '');
+    let safeHtml = sanitizeHtml(raw || '');
+    safeHtml = safeHtml.replace(/\[([^\[\]]+?\.pdf:\d+)\]/g, '<span class="citation-ref" data-ref="$1">[$1]</span>');
+    const container = document.createElement('div');
+    container.className = 'bubble-content-body';
+    container.innerHTML = safeHtml;
+    enhanceMarkdownDom(container);
+    return container;
+  };
+
+  const formatConfidence = (value) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return null;
+    const clamped = Math.max(0, Math.min(1, value));
+    return `${Math.round(clamped * 100)}%`;
+  };
+
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return null;
+    const isMillis = timestamp > 1e12;
+    const date = new Date(isMillis ? timestamp : timestamp * 1000);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const createMetaPill = (label, value, type = 'default') => {
+    const pill = document.createElement('span');
+    pill.className = `meta-pill meta-pill-${type}`;
+    pill.textContent = `${label}: ${value}`;
+    return pill;
+  };
+
+  const createSourceChips = (sources) => {
+    if (!Array.isArray(sources) || sources.length === 0) return null;
+    const footer = document.createElement('div');
+    footer.className = 'bubble-footer';
+    const label = document.createElement('span');
+    label.className = 'bubble-footer-label';
+    label.textContent = 'Nguồn tham khảo:';
+    footer.appendChild(label);
+
+    sources.forEach((source) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'source-chip';
+      chip.textContent = `${source.filename}:${source.page}`;
+      chip.dataset.filename = source.filename;
+      chip.dataset.page = source.page;
+      chip.dataset.sourceKey = buildSourceKey(source.filename, source.page);
+      chip.addEventListener('click', (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        highlightSourceReference(source.filename, source.page);
+      });
+      footer.appendChild(chip);
+    });
+    return footer;
+  };
+
+  const SOURCE_KEY_DELIMITER = '|';
+  const HIGHLIGHT_DURATION = 1800;
+
+  const escapeForSelector = (value = '') => {
+    if (window.CSS && CSS.escape) {
+      return CSS.escape(value);
+    }
+    return value.replace(/"/g, '\\"').replace(/\\/g, '\\\\');
+  };
+
+  const buildSourceKey = (filename, page) => {
+    if (!filename) return null;
+    return `${filename}:${page ?? ''}`;
+  };
+
+  const parseCitationToken = (value) => {
+    if (!value) return null;
+    const parts = value.split(':');
+    const filename = parts[0]?.trim();
+    if (!filename) return null;
+    const page = parts.slice(1).join(':').trim();
+    return {
+      filename,
+      page,
+    };
+  };
+
+  const parseSourceKeys = (value = '') =>
+    value
+      .split(SOURCE_KEY_DELIMITER)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const pulseElement = (element, className) => {
+    if (!element) return;
+    element.classList.add(className);
+    window.setTimeout(() => {
+      element.classList.remove(className);
+    }, HIGHLIGHT_DURATION);
+  };
+
+  const highlightSourceReference = (filename, page) => {
+    if (!filename) return;
+    const sourceKey = buildSourceKey(filename, page);
+    const escapedFilename = escapeForSelector(filename);
+    const escapedPage = escapeForSelector(String(page ?? ''));
+
+    if (dom.citationsList) {
+      const card = dom.citationsList.querySelector(
+        `.citation-card[data-filename="${escapedFilename}"][data-page="${escapedPage}"]`
+      );
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        pulseElement(card, 'citation-highlight');
+      }
+    }
+
+    if (dom.chatContainer && sourceKey) {
+      const bubble = Array.from(dom.chatContainer.querySelectorAll('.chat-bubble.ai')).find((node) => {
+        const keys = parseSourceKeys(node.dataset.sourceKeys || '');
+        return keys.includes(sourceKey);
+      });
+      if (bubble) {
+        bubble.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        pulseElement(bubble, 'chat-highlight');
+      }
+    }
+  };
+
+  const toastCopyResult = (success) => {
+    if (!dom.toastElement) return;
+    if (success) {
+      dom.toastElement.className = 'toast bg-success text-white';
+      dom.toastElement.querySelector('.toast-body').textContent = 'Đã sao chép câu trả lời vào bộ nhớ tạm.';
+    } else {
+      dom.toastElement.className = 'toast bg-danger text-white';
+      dom.toastElement.querySelector('.toast-body').textContent = 'Không thể sao chép. Vui lòng thử lại.';
+    }
+    bsToast.show();
+  };
+
+  const copyToClipboard = async (text) => {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        toastCopyResult(true);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Navigator clipboard API error:', err);
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const success = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      toastCopyResult(success);
+      return success;
+    } catch (err) {
+      console.warn('Fallback clipboard copy error:', err);
+      toastCopyResult(false);
+      return false;
+    }
+  };
+
+  const createAssistantBubble = (message, index) => {
+    const bubble = document.createElement('article');
+    bubble.className = 'chat-bubble ai';
+
+    const header = document.createElement('div');
+    header.className = 'bubble-header';
+
+    const headerTitle = document.createElement('div');
+    headerTitle.className = 'bubble-title';
+    headerTitle.innerHTML = '<i class="bi bi-stars"></i> Trợ lý RAG';
+    header.appendChild(headerTitle);
+
+    const meta = document.createElement('div');
+    meta.className = 'bubble-meta';
+
+    const confidenceText = formatConfidence(message.confidence);
+    if (confidenceText) {
+      meta.appendChild(createMetaPill('Độ tin cậy', confidenceText, 'confidence'));
+    }
+
+    const timeLabel = formatTimestamp(message.timestamp);
+    if (timeLabel) {
+      meta.appendChild(createMetaPill('Thời gian', timeLabel));
+    }
+
+    header.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'bubble-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn btn-light btn-sm copy-answer-btn';
+    copyBtn.innerHTML = '<i class="bi bi-clipboard"></i> Sao chép';
+    copyBtn.dataset.copyText = message.content || '';
+    actions.appendChild(copyBtn);
+    header.appendChild(actions);
+
+    bubble.appendChild(header);
+
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'bubble-content';
+    const markdown = buildMarkdownContent(message.content || '');
+    contentWrapper.appendChild(markdown);
+    bubble.appendChild(contentWrapper);
+
+    const sourcesFooter = createSourceChips(message.sources);
+    if (sourcesFooter) {
+      bubble.appendChild(sourcesFooter);
+    }
+
+    if (typeof index === 'number') {
+      bubble.dataset.messageIndex = String(index);
+    }
+    if (message.timestamp) {
+      bubble.dataset.timestamp = String(message.timestamp);
+    }
+    const sourceKeys = Array.isArray(message.sources)
+      ? message.sources
+          .map((src) => buildSourceKey(src.filename, src.page))
+          .filter(Boolean)
+          .join(SOURCE_KEY_DELIMITER)
+      : '';
+    if (sourceKeys) {
+      bubble.dataset.sourceKeys = sourceKeys;
+    }
+
+    bubble.addEventListener('click', (event) => {
+      const targetChip = event.target.closest('.source-chip');
+      if (targetChip) {
+        highlightSourceReference(targetChip.dataset.filename, targetChip.dataset.page);
+        return;
+      }
+
+      const copyButton = event.target.closest('.copy-answer-btn');
+      if (copyButton) {
+        copyToClipboard(message.content || '').catch((err) => {
+          console.error('Copy failed:', err);
+        });
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+
+    return bubble;
+  };
+
+  const createUserBubble = (message, index) => {
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble user';
+    bubble.textContent = message.content || '';
+    if (typeof index === 'number') {
+      bubble.dataset.messageIndex = String(index);
+    }
+    if (message.timestamp) {
+      bubble.dataset.timestamp = String(message.timestamp);
+    }
+    return bubble;
+  };
+
+  const createTypingBubble = () => {
+    const bubble = document.createElement('article');
+    bubble.className = 'chat-bubble ai bubble-loading';
+    bubble.innerHTML = `
+      <div class="bubble-content bubble-content-loading">
+        <div class="dot-flashing"></div>
+        <span class="ms-2 text-muted small">Trợ lý đang suy nghĩ...</span>
+      </div>
+    `;
+    return bubble;
   };
 
   const updateKnowledgePanel = (chat) => {
@@ -526,22 +897,16 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    chat.messages.forEach((message) => {
-      const bubble = document.createElement('div');
-      bubble.className = `chat-bubble ${message.role === 'assistant' ? 'ai' : 'user'}`;
+    chat.messages.forEach((message, index) => {
       if (message.role === 'assistant') {
-        bubble.innerHTML = formatTextContent(message.content || 'Đang xử lý...');
+        dom.chatContainer.appendChild(createAssistantBubble(message, index));
       } else {
-        bubble.textContent = message.content || '';
+        dom.chatContainer.appendChild(createUserBubble(message, index));
       }
-      dom.chatContainer.appendChild(bubble);
     });
 
     if (state.isAsking && chatId === state.activeChatId) {
-      const loadingBubble = document.createElement('div');
-      loadingBubble.className = 'chat-bubble ai';
-      loadingBubble.innerHTML = '<div class="d-flex align-items-center"><div class="dot-flashing"></div></div>';
-      dom.chatContainer.appendChild(loadingBubble);
+      dom.chatContainer.appendChild(createTypingBubble());
     }
 
     dom.chatContainer.scrollTop = dom.chatContainer.scrollHeight;
@@ -562,7 +927,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     sources.forEach((source) => {
       const card = document.createElement('div');
-      card.className = 'card';
+      card.className = 'card citation-card';
+      card.dataset.filename = source.filename;
+      card.dataset.page = source.page;
+      card.dataset.sourceKey = buildSourceKey(source.filename, source.page);
+      card.tabIndex = 0;
       card.innerHTML = `
           <div class="card-body">
             <h6 class="card-title">
@@ -571,6 +940,16 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="card-text small">${source.content}</p>
             <div class="text-end small text-muted">Score: ${(source.score ?? 0).toFixed(3)}</div>
           </div>`;
+      const activate = (event) => {
+        event.preventDefault();
+        highlightSourceReference(source.filename, source.page);
+      };
+      card.addEventListener('click', activate);
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          activate(event);
+        }
+      });
       dom.citationsList.appendChild(card);
     });
   };
