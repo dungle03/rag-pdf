@@ -73,7 +73,7 @@ graph TB
         FILES["📁 File System<br/>Session-based"]
         ECACHE["⚡ Embedding Cache<br/>SQLite + SHA1"]
         ACACHE["🗃️ Answer Cache<br/>Query + DocSet"]
-        LOGS["📊 Structured Logs<br/>JSON Format"]
+        LOGS["📁 File Logs<br/>Plaintext"]
     end
     
     subgraph Security["🛡️ Security & Monitoring"]
@@ -199,7 +199,7 @@ graph TB
   - PDF signature validation (`%PDF` header)
   - Filename sanitization với regex pattern
 - **Security Headers**: CORS configuration và security middleware
-- **Structured Logging**: JSON format logs trong `./logs/` với rotation
+- **Logging**: Ghi log dạng plaintext theo ngày trong `./logs/`
 - **Error Handling**: Comprehensive exception handling với user-friendly messages
 - **Health Monitoring**: `/healthz` endpoint cho load balancer checks
 - **Memory Management**: Streaming file upload để tránh memory overflow
@@ -458,7 +458,7 @@ Chỉnh sửa `tests/eval_cases.json`:
 
 Xem logs chi tiết:
 ```bash
-# Logs được lưu trong ./logs/
+# Logs dạng plaintext theo ngày trong ./logs/
 tail -f logs/rag_pdf_$(date +%Y%m%d).log
 ```
 
@@ -491,7 +491,7 @@ rag-pdf/
 │   │   └── cache.py              # Embedding cache utilities
 │   └── utils/                    # 🛠️ Production Utilities
 │       ├── config.py             # Environment variable parsing + validation
-│       ├── logger.py             # Structured logging với JSON format
+│       ├── logger.py             # Cấu hình logging (plaintext, ghi log theo ngày)
 │       ├── security.py           # Input validation + file sanitization + MIME check
 │       ├── monitoring.py         # Error handling + metrics collection
 │       ├── rate_limiter.py       # Per-IP rate limiting cho API endpoints
@@ -515,8 +515,8 @@ rag-pdf/
 │       ├── document.pdf         # Uploaded PDF files
 │       ├── manifest.json        # Session metadata + processing info
 │       └── faiss_index.bin      # Session-specific FAISS index
-├── logs/                         # 📊 Application Logs (auto-created)
-│   └── rag_pdf_YYYYMMDD.log     # Daily log files với structured format
+├── logs/                         # 📁 Plaintext application logs (auto-created per day)
+│   └── rag_pdf_YYYYMMDD.log     # Daily log files (plaintext)
 ├── .venv/                        # 🐍 Python Virtual Environment
 ├── requirements.txt              # 📋 Python dependencies với version pinning
 ├── .env.example                  # 📝 Environment configuration template
@@ -576,7 +576,7 @@ rag-pdf/
 - **Type Hints**: Bắt buộc cho tất cả functions và class methods
 - **Docstrings**: Google style cho modules, classes và public functions
 - **Error Handling**: Sử dụng custom exceptions và structured error responses
-- **Logging**: Structured logging với contextual information
+- **Logging**: Plaintext logging (timestamped, contextual fields)
 - **Testing**: Unit tests + integration tests cho mọi feature mới
 
 #### 🧪 Testing Strategy
