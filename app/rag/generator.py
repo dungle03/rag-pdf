@@ -267,9 +267,54 @@ Sử dụng markdown, trích dẫn chính xác, đảm bảo logic và đầy đ
                 "chỉnh sửa câu hỏi."
             )
 
+    conf = 0.0
     if passages:
-        scores = [_sigmoid(p.score) for p in passages]
-        conf = sum(scores) / len(scores)
-    else:
-        conf = 0.0
+        chunk_scores: list[float] = []
+        for p in passages:
+            meta = getattr(p, "meta", {}) or {}
+            candidates: list[float] = []
+            for key in ("relevance", "hybrid_score", "dense_score", "bm25_score"):
+                val = meta.get(key)
+                if val is None:
+                    continue
+                try:
+                    candidates.append(float(val))
+                except (TypeError, ValueError):
+                    continue
+            if not candidates and getattr(p, "score", None) is not None:
+                candidates.append(_sigmoid(p.score))
+            if not candidates:
+                continue
+            best = max(candidates)
+            chunk_scores.append(max(0.0, min(1.0, best)))
+
+        if chunk_scores:
+            chunk_scores.sort(reverse=True)
+            primary = chunk_scores[0]
+            support_vals = chunk_scores[1:3]
+            support = (
+                sum(support_vals) / len(support_vals) if support_vals else primary
+            )
+            high_quality = len([s for s in chunk_scores if s >= 0.6])
+            coverage_ratio = min(
+                1.0, high_quality / max(1, len(chunk_scores))
+            )
+            consistency = 1.0 - min(1.0, abs(primary - support))
+
+            blended = (
+                0.6 * primary
+                + 0.25 * support
+                + 0.1 * coverage_ratio
+                + 0.05 * consistency
+            )
+
+            if primary >= 0.85:
+                blended = max(blended, 0.92)
+            elif primary >= 0.75:
+                blended = max(blended, 0.84)
+            elif primary >= 0.65:
+                blended = max(blended, 0.76)
+
+            conf = min(0.99, max(primary * 0.9, blended))
+
     return answer, float(conf)

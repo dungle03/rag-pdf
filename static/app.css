@@ -896,21 +896,93 @@ body {
 }
 
 .bubble-loading {
-  background: transparent;
-  border: none;
-  box-shadow: none;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.18);
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+[data-theme="dark"] .bubble-loading {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.48);
 }
 
 .bubble-loading .bubble-content {
-  padding: 0;
+  padding: 0.85rem 1rem;
 }
 
 .bubble-content-loading {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.8rem 1rem;
+  gap: 1rem;
   color: var(--text-secondary);
+}
+
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+[data-theme="dark"] .typing-indicator {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.typing-indicator span {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary-color);
+  opacity: 0.35;
+  animation: typingBounce 1s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.typing-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.typing-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.typing-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+@keyframes typingBounce {
+  0% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+
+  40% {
+    transform: translateY(-3px);
+    opacity: 0.85;
+  }
+
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
 }
 
 .chat-highlight {
@@ -967,12 +1039,12 @@ body {
   font-size: 1.03em;
 }
 
-border-radius: 4px;
+/* border-radius: 4px;
 font-size: 0.8rem;
 font-weight: 500;
 margin: 0 0.2rem;
 display: inline-block;
-}
+} */
 
 /* Better text formatting in chat bubbles */
 .chat-bubble strong {

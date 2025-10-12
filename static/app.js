@@ -580,13 +580,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!citation) return;
       refEl.setAttribute('role', 'button');
       refEl.setAttribute('tabindex', '0');
+       refEl.dataset.filename = citation.filename;
+       refEl.dataset.page = citation.page ?? '';
       refEl.addEventListener('click', () => {
-        highlightSourceReference(citation.filename, citation.page);
+        highlightSourceReference(
+          citation.filename,
+          citation.pages && citation.pages.length ? citation.pages : citation.page,
+        );
       });
       refEl.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          highlightSourceReference(citation.filename, citation.page);
+          highlightSourceReference(
+            citation.filename,
+            citation.pages && citation.pages.length ? citation.pages : citation.page,
+          );
         }
       });
     });
@@ -595,7 +603,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const buildMarkdownContent = (markdown) => {
     const raw = typeof marked !== 'undefined' ? marked.parse(markdown || '') : (markdown || '');
     let safeHtml = sanitizeHtml(raw || '');
-    safeHtml = safeHtml.replace(/\[([^\[\]]+?\.pdf:\d+)\]/g, '<span class="citation-ref" data-ref="$1">[$1]</span>');
+    const citationPattern = /\[([^\[\]]+?\.pdf:\s*\d+(?:\s*(?:[-–,]\s*\d+)*)?)\]/gi;
+    safeHtml = safeHtml.replace(citationPattern, (_match, token) => {
+      const dataRef = String(token || '').replace(/"/g, '&quot;');
+      return `<span class="citation-ref" data-ref="${dataRef}">[${token}]</span>`;
+    });
     const container = document.createElement('div');
     container.className = 'bubble-content-body';
     container.innerHTML = safeHtml;
@@ -626,6 +638,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const createSourceChips = (sources) => {
     if (!Array.isArray(sources) || sources.length === 0) return null;
+
+    const uniqueEntries = new Map();
+    sources.forEach((source) => {
+      if (!source || !source.filename) return;
+      const filename = source.filename.trim();
+      const pageValue = source.page === undefined || source.page === null
+        ? ''
+        : String(source.page).trim();
+      const key = pageValue ? `${filename}:${pageValue}` : filename;
+      if (!uniqueEntries.has(key)) {
+        uniqueEntries.set(key, { filename, page: pageValue });
+      }
+    });
+
+    if (uniqueEntries.size === 0) return null;
+
     const footer = document.createElement('div');
     footer.className = 'bubble-footer';
     const label = document.createElement('span');
@@ -633,21 +661,24 @@ document.addEventListener('DOMContentLoaded', () => {
     label.textContent = 'Nguồn tham khảo:';
     footer.appendChild(label);
 
-    sources.forEach((source) => {
+    const sortedKeys = Array.from(uniqueEntries.keys()).sort((a, b) => a.localeCompare(b));
+    sortedKeys.forEach((key) => {
+      const entry = uniqueEntries.get(key);
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'source-chip';
-      chip.textContent = `${source.filename}:${source.page}`;
-      chip.dataset.filename = source.filename;
-      chip.dataset.page = source.page;
-      chip.dataset.sourceKey = buildSourceKey(source.filename, source.page);
+      chip.textContent = entry.page ? `${entry.filename}:${entry.page}` : entry.filename;
+      chip.dataset.filename = entry.filename;
+      chip.dataset.page = entry.page;
+      chip.dataset.sourceKey = buildSourceKey(entry.filename, entry.page);
       chip.addEventListener('click', (evt) => {
         evt.preventDefault();
         evt.stopPropagation();
-        highlightSourceReference(source.filename, source.page);
+        highlightSourceReference(entry.filename, entry.page);
       });
       footer.appendChild(chip);
     });
+
     return footer;
   };
 
@@ -671,10 +702,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const parts = value.split(':');
     const filename = parts[0]?.trim();
     if (!filename) return null;
-    const page = parts.slice(1).join(':').trim();
+    const pagePart = parts.slice(1).join(':').trim();
+    const pages = [];
+
+    if (pagePart) {
+      pagePart
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .forEach((segment) => {
+          const rangeMatch = segment.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+          if (rangeMatch) {
+            const [start, end] = rangeMatch.slice(1).map((n) => n.trim());
+            if (start) pages.push(start);
+            if (end) pages.push(end);
+          } else {
+            pages.push(segment);
+          }
+        });
+    }
+
     return {
       filename,
-      page,
+      page: pages[0] || pagePart || '',
+      pages,
+      raw: pagePart,
     };
   };
 
@@ -692,32 +744,93 @@ document.addEventListener('DOMContentLoaded', () => {
     }, HIGHLIGHT_DURATION);
   };
 
-  const highlightSourceReference = (filename, page) => {
+  const scrollElementIntoContainer = (container, element, { margin = 24 } = {}) => {
+    if (!container || !element || typeof container.getBoundingClientRect !== 'function') {
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+
+    const withinVertical =
+      elementRect.top >= containerRect.top + margin &&
+      elementRect.bottom <= containerRect.bottom - margin;
+    if (withinVertical) {
+      return;
+    }
+
+    const currentScrollTop =
+      typeof container.scrollTop === 'number' ? container.scrollTop : 0;
+    const targetTop =
+      elementRect.top - containerRect.top + currentScrollTop - (containerRect.height - elementRect.height) / 2;
+    const scrollTop = Math.max(0, targetTop);
+
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: scrollTop, behavior: 'smooth' });
+    } else {
+      container.scrollTop = scrollTop;
+    }
+  };
+
+  const highlightSourceReference = (filename, pageOrPages) => {
     if (!filename) return;
-    const sourceKey = buildSourceKey(filename, page);
+    const rawPages = Array.isArray(pageOrPages) ? pageOrPages : [pageOrPages];
+    const normalizedPages = rawPages
+      .map((page) => (page === null || page === undefined ? '' : String(page).trim()))
+      .filter((value, index, array) => array.indexOf(value) === index);
+
+    if (normalizedPages.length === 0) {
+      highlightSingleSource(filename, '', true);
+      return;
+    }
+
+    let bubbleHighlighted = false;
+    normalizedPages.forEach((page) => {
+      const result = highlightSingleSource(filename, page, !bubbleHighlighted);
+      if (result.bubbleHighlighted) {
+        bubbleHighlighted = true;
+      }
+    });
+  };
+
+  const highlightSingleSource = (filename, page, highlightBubble) => {
     const escapedFilename = escapeForSelector(filename);
-    const escapedPage = escapeForSelector(String(page ?? ''));
+    const trimmedPage = page === null || page === undefined ? '' : String(page).trim();
+    const escapedPage = escapeForSelector(trimmedPage);
 
     if (dom.citationsList) {
-      const card = dom.citationsList.querySelector(
-        `.citation-card[data-filename="${escapedFilename}"][data-page="${escapedPage}"]`
-      );
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const selector = trimmedPage
+        ? `.citation-card[data-filename="${escapedFilename}"][data-page="${escapedPage}"]`
+        : `.citation-card[data-filename="${escapedFilename}"]`;
+      const cards = dom.citationsList.querySelectorAll(selector);
+      const scrollContainer =
+        dom.citationsList.closest('.knowledge-body') ||
+        dom.knowledgeContent ||
+        dom.citationsList;
+      cards.forEach((card) => {
+        scrollElementIntoContainer(scrollContainer, card, { margin: 40 });
         pulseElement(card, 'citation-highlight');
+      });
+    }
+
+    let bubbleHighlighted = false;
+    if (highlightBubble && dom.chatContainer) {
+      const bubbles = Array.from(dom.chatContainer.querySelectorAll('.chat-bubble.ai'));
+      const sourceKey = trimmedPage ? buildSourceKey(filename, trimmedPage) : null;
+      const bubble = bubbles.find((node) => {
+        const keys = parseSourceKeys(node.dataset.sourceKeys || '');
+        if (sourceKey) {
+          return keys.includes(sourceKey);
+        }
+        return keys.some((key) => key.startsWith(`${filename}:`));
+      });
+      if (bubble) {
+        pulseElement(bubble, 'chat-highlight');
+        bubbleHighlighted = true;
       }
     }
 
-    if (dom.chatContainer && sourceKey) {
-      const bubble = Array.from(dom.chatContainer.querySelectorAll('.chat-bubble.ai')).find((node) => {
-        const keys = parseSourceKeys(node.dataset.sourceKeys || '');
-        return keys.includes(sourceKey);
-      });
-      if (bubble) {
-        bubble.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        pulseElement(bubble, 'chat-highlight');
-      }
-    }
+    return { bubbleHighlighted };
   };
 
   const toastCopyResult = (success) => {
@@ -831,7 +944,13 @@ document.addEventListener('DOMContentLoaded', () => {
     bubble.addEventListener('click', (event) => {
       const targetChip = event.target.closest('.source-chip');
       if (targetChip) {
-        highlightSourceReference(targetChip.dataset.filename, targetChip.dataset.page);
+        const chipPages = targetChip.dataset.pages
+          ? targetChip.dataset.pages.split('|').map((p) => p.trim()).filter(Boolean)
+          : [];
+        highlightSourceReference(
+          targetChip.dataset.filename,
+          chipPages.length ? chipPages : targetChip.dataset.page,
+        );
         return;
       }
 
@@ -865,9 +984,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const bubble = document.createElement('article');
     bubble.className = 'chat-bubble ai bubble-loading';
     bubble.innerHTML = `
-      <div class="bubble-content bubble-content-loading">
-        <div class="dot-flashing"></div>
-        <span class="ms-2 text-muted small">Trợ lý đang suy nghĩ...</span>
+      <div class="bubble-content bubble-content-loading" role="status" aria-live="polite">
+        <div class="typing-indicator">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="typing-text">
+          <span class="typing-label">Trợ lý đang suy nghĩ…</span>
+          <span class="typing-hint">Đang tổng hợp thông tin phù hợp</span>
+        </div>
       </div>
     `;
     return bubble;
@@ -938,7 +1064,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <span class="citation-tag" title="Click để xem chi tiết">${source.filename}:${source.page}</span>
             </h6>
             <p class="card-text small">${source.content}</p>
-            <div class="text-end small text-muted">Score: ${(source.score ?? 0).toFixed(3)}</div>
+            <div class="text-end small text-muted">Mức khớp: ${formatScoreDisplay(source)}</div>
           </div>`;
       const activate = (event) => {
         event.preventDefault();
@@ -1624,3 +1750,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   init();
 });
+  const formatScoreDisplay = (source) => {
+    if (!source || typeof source !== 'object') return '';
+    const relevance = Number(source.relevance);
+    if (!Number.isNaN(relevance) && relevance > 0) {
+      return `${Math.round(Math.min(relevance, 1) * 100)}%`;
+    }
+    const score = Number(source.score);
+    if (!Number.isNaN(score) && Number.isFinite(score)) {
+      return score.toFixed(3);
+    }
+    return '';
+  };
