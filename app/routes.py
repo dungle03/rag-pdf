@@ -813,7 +813,7 @@ async def ask(
         answer, confidence = generate(query, passages)
 
         citation_pairs = _extract_citation_pairs(answer)
-        passages_for_sources = passages
+        passages_for_sources: list[Chunk] = []
         if citation_pairs:
             def _passage_matches(p: Chunk) -> bool:
                 doc = p.doc_name
@@ -824,9 +824,12 @@ async def ask(
                     or (doc, "") in citation_pairs
                 )
 
-            matched_passages = [p for p in passages if _passage_matches(p)]
-            if matched_passages:
-                passages_for_sources = matched_passages
+            passages_for_sources = [
+                p for p in passages if _passage_matches(p)
+            ]
+
+        if not citation_pairs or not passages_for_sources:
+            passages_for_sources = []
 
         sources = [
             {
