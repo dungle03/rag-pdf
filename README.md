@@ -164,6 +164,7 @@ graph TB
 ### 🧠 Sinh câu trả lời thông minh
 - **Context-aware Generation**: Sử dụng **Gemini 2.0 Flash** với prompt engineering
 - **Mandatory Citations**: Bắt buộc format **[doc:page]** cho mọi thông tin trích dẫn
+- **Citation Mapping**: Backend chỉ trả về nguồn đúng với trích dẫn trong câu trả lời và highlight đồng bộ khi người dùng click.
 - **Guardrail System**: `GENERATE_MIN_SIM=0.20` để tránh hallucination
 - **Vietnamese Optimization**: Prompt được tối ưu cho tiếng Việt
 - **Confidence Scoring**: Tính toán độ tin cậy dựa trên vector similarity
@@ -177,7 +178,9 @@ graph TB
 ### 💬 Quản lý hội thoại đa phiên
 - **Mỗi chat = một session độc lập**: Khi tạo cuộc trò chuyện mới, hệ thống phát sinh session riêng, cô lập hoàn toàn lịch sử hội thoại và tài liệu.
 - **Bảng điều khiển trực quan**: Thanh bên trái hiển thị mã session, số tài liệu đã xử lý và tổng số đoạn chat để bạn theo dõi trạng thái nhanh chóng.
+- **Trải nghiệm realtime**: Bong bóng “Trợ lý đang suy nghĩ”, toast thông báo và trạng thái hỏi/ingest cập nhật liên tục bằng JS thuần.
 - **Chuyển đổi tức thì**: Click để mở lại bất kỳ cuộc trò chuyện nào, mọi tin nhắn và trích dẫn được tải về ngay lập tức.
+- **Knowledge sidebar**: Panel nguồn tham chiếu hiển thị tỷ lệ khớp theo %, click để cuộn tới đoạn gốc trong tài liệu.
 - **Đổi tên linh hoạt**: Đặt lại tiêu đề chat chỉ bằng một cú nhấp chuột, giúp ghi nhớ nội dung làm việc.
 - **Xoá gọn gàng**: Loại bỏ những đoạn chat đã hoàn thành; session và vector store tương ứng được dọn sạch khỏi ổ đĩa.
 - **Khôi phục tự động**: Lưu session gần nhất vào LocalStorage; khi mở lại ứng dụng, cuộc trò chuyện cuối cùng được kích hoạt sẵn.
@@ -188,10 +191,7 @@ graph TB
   - **Answer Cache**: Query + DocumentSet hashing cho instant responses
 - **Concurrent Processing**: ThreadPool với `EMBED_CONCURRENCY=4` cho batch embedding
 - **Session Management**: Cách ly dữ liệu theo `session_id` UUID
-- **Rate Limiting**: Bảo vệ API endpoints:
-  - `/upload`: 5 requests/minute
-  - `/ingest`: 3 requests/5 minutes  
-  - `/ask`: 30 requests/minute
+- **Rate limiter helper**: Tiện ích giới hạn tần suất (có sẵn trong `app/utils/rate_limiter.py`), kích hoạt thủ công khi triển khai production.
 
 ### 🛡️ Bảo mật & Monitoring Production-Ready
 - **Input Validation**: 
@@ -267,14 +267,13 @@ MMR_LAMBDA=0.5                    # Diversity factor cho MMR
 RERANK_ON=true                    # Bật BGE reranker (tăng latency ~500ms)
 
 # === Generation Settings ===
-GENERATE_MIN_SIM=0.25             # Threshold tối thiểu để sinh câu trả lời
-ANSWER_MIN_CONTEXT_PROB=0.35      # Bỏ qua câu trả lời nếu ngữ cảnh quá yếu
-ANSWER_MIN_DIRECT_PROB=0.25       # Từ chối nếu không đủ bằng chứng trực tiếp
-GEN_TEMPERATURE=0.3               # Temperature cho suy luận sáng tạo (tăng từ 0.1)
-GEN_MAX_OUTPUT_TOKENS=1024        # Tăng để hỗ trợ suy luận chi tiết (từ 256)
+GENERATE_MIN_SIM=0.20             # Threshold tối thiểu để sinh câu trả lời
+ANSWER_MIN_CONTEXT_PROB=0.30      # Bỏ qua câu trả lời nếu ngữ cảnh quá yếu
+ANSWER_MIN_DIRECT_PROB=0.20       # Từ chối nếu không đủ bằng chứng trực tiếp
+GEN_TEMPERATURE=0.3               # Temperature cho suy luận sáng tạo
+GEN_MAX_OUTPUT_TOKENS=1024        # Độ dài tối đa phản hồi
 
 # === Storage & Caching ===
-VECTOR_STORE=faiss                # faiss hoặc chroma
 PERSIST_DIR=./storage
 ENABLE_EMBED_CACHE=true           # Cache embeddings (giảm 90% API calls)
 EMBED_CACHE_DB=./storage/embed_cache.sqlite
@@ -293,7 +292,7 @@ OCR_LANG=vie+eng                  # Ngôn ngữ OCR (Vietnamese + English)
 
 # === Performance Tuning ===
 EMBED_CONCURRENCY=4               # Số threads cho embedding generation
-EMBED_SLEEP_MS=100                # Delay giữa API calls (tránh rate limit)
+EMBED_SLEEP_MS=0                  # Delay giữa API calls (tránh rate limit)
 
 # === Chunking Parameters ===
 CHUNK_SIZE=380                    # Kích thước chunk (tokens)
@@ -803,11 +802,7 @@ sudo apt-get install tesseract-ocr tesseract-ocr-vie
 pip uninstall faiss-cpu
 pip install faiss-cpu --no-cache-dir --force-reinstall
 
-# Giải pháp 2: Chuyển sang ChromaDB
-# Trong .env: VECTOR_STORE=chroma
-pip install chromadb
-
-# Giải pháp 3: Conda environment
+# Giải pháp 2: Dùng Conda environment
 conda install -c conda-forge faiss-cpu
 ```
 

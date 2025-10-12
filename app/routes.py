@@ -1,4 +1,4 @@
-import os, uuid, json, time, shutil, math
+import os, uuid, json, time, shutil, math, re
 import numpy as np
 from typing import List
 from fastapi import APIRouter, Request, UploadFile, File, Form, BackgroundTasks
@@ -69,6 +69,46 @@ def _chunk_probability(chunk: Chunk) -> float:
             if prob > 0:
                 return prob
     return _score_to_probability(getattr(chunk, "score", None))
+
+
+_CITATION_RE = re.compile(r"\[([^\[\]]+?\.pdf)\s*:\s*([^\]]+?)\]")
+
+
+def _extract_citation_pairs(answer: str) -> set[tuple[str, str | None]]:
+    """Trích danh sách (tài liệu, trang) từ câu trả lời."""
+    pairs: set[tuple[str, str | None]] = set()
+    if not answer:
+        return pairs
+
+    for doc_name, raw_pages in _CITATION_RE.findall(answer):
+        doc = (doc_name or "").strip()
+        if not doc:
+            continue
+        raw = (raw_pages or "").strip()
+        if not raw:
+            pairs.add((doc, None))
+            continue
+        segments = [seg.strip() for seg in raw.split(",") if seg.strip()]
+        if not segments:
+            pairs.add((doc, None))
+            continue
+        for segment in segments:
+            range_match = re.match(r"^(\d+)\s*[-–]\s*(\d+)$", segment)
+            if range_match:
+                try:
+                    start = int(range_match.group(1))
+                    end = int(range_match.group(2))
+                    if start <= end:
+                        for page_num in range(start, end + 1):
+                            pairs.add((doc, str(page_num)))
+                        continue
+                except ValueError:
+                    pass
+                pairs.add((doc, range_match.group(1)))
+                pairs.add((doc, range_match.group(2)))
+            else:
+                pairs.add((doc, segment))
+    return pairs
 
 
 def _session_summary(session_id: str) -> dict:
@@ -772,6 +812,22 @@ async def ask(
         app_logger.info("Generating answer...")
         answer, confidence = generate(query, passages)
 
+        citation_pairs = _extract_citation_pairs(answer)
+        passages_for_sources = passages
+        if citation_pairs:
+            def _passage_matches(p: Chunk) -> bool:
+                doc = p.doc_name
+                page_str = str(p.page)
+                return (
+                    (doc, page_str) in citation_pairs
+                    or (doc, None) in citation_pairs
+                    or (doc, "") in citation_pairs
+                )
+
+            matched_passages = [p for p in passages if _passage_matches(p)]
+            if matched_passages:
+                passages_for_sources = matched_passages
+
         sources = [
             {
                 "filename": p.doc_name,
@@ -780,7 +836,7 @@ async def ask(
                 "relevance": float((p.meta or {}).get("relevance", 0.0)),
                 "content": (p.text[:300] + "…") if len(p.text) > 320 else p.text,
             }
-            for p in passages
+            for p in passages_for_sources
         ]
 
         latency = int((time.time() - t0) * 1000)
