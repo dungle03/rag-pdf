@@ -580,8 +580,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!citation) return;
       refEl.setAttribute('role', 'button');
       refEl.setAttribute('tabindex', '0');
-       refEl.dataset.filename = citation.filename;
-       refEl.dataset.page = citation.page ?? '';
+      refEl.dataset.filename = citation.filename;
+      refEl.dataset.page = citation.page ?? '';
       refEl.addEventListener('click', () => {
         highlightSourceReference(
           citation.filename,
@@ -933,9 +933,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const sourceKeys = Array.isArray(message.sources)
       ? message.sources
-          .map((src) => buildSourceKey(src.filename, src.page))
-          .filter(Boolean)
-          .join(SOURCE_KEY_DELIMITER)
+        .map((src) => buildSourceKey(src.filename, src.page))
+        .filter(Boolean)
+        .join(SOURCE_KEY_DELIMITER)
       : '';
     if (sourceKeys) {
       bubble.dataset.sourceKeys = sourceKeys;
@@ -1058,13 +1058,25 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.page = source.page;
       card.dataset.sourceKey = buildSourceKey(source.filename, source.page);
       card.tabIndex = 0;
+
+      // Enhanced: Add status badge and age info
+      const statusBadge = getStatusBadge(source.document_status);
+      const ageInfo = getAgeInfo(source.upload_timestamp);
+      const recencyBadge = source.recency_score ?
+        `<span class="badge bg-info ms-1" title="Recency Score">📅 ${(source.recency_score * 100).toFixed(0)}%</span>` : '';
+
       card.innerHTML = `
           <div class="card-body">
             <h6 class="card-title">
               <span class="citation-tag" title="Click để xem chi tiết">${source.filename}:${source.page}</span>
+              ${statusBadge}
+              ${recencyBadge}
             </h6>
             <p class="card-text small">${source.content}</p>
-            <div class="text-end small text-muted">Mức khớp: ${formatScoreDisplay(source)}</div>
+            <div class="d-flex justify-content-between align-items-center">
+              <small class="text-muted">${ageInfo}</small>
+              <small class="text-muted">Mức khớp: ${formatScoreDisplay(source)}</small>
+            </div>
           </div>`;
       const activate = (event) => {
         event.preventDefault();
@@ -1078,6 +1090,29 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       dom.citationsList.appendChild(card);
     });
+  };
+
+  // Helper functions for document status and age
+  const getStatusBadge = (status) => {
+    const badges = {
+      'active': '<span class="badge bg-success ms-1" title="Tài liệu mới nhất">✨ Mới</span>',
+      'superseded': '<span class="badge bg-warning text-dark ms-1" title="Đã được cập nhật">📝 Cũ</span>',
+      'archived': '<span class="badge bg-secondary ms-1" title="Đã lưu trữ">📦 Archive</span>'
+    };
+    return badges[status] || '';
+  };
+
+  const getAgeInfo = (timestamp) => {
+    if (!timestamp) return '';
+    const now = Date.now() / 1000;
+    const ageDays = Math.floor((now - timestamp) / 86400);
+
+    if (ageDays === 0) return '📅 Hôm nay';
+    if (ageDays === 1) return '📅 Hôm qua';
+    if (ageDays < 7) return `📅 ${ageDays} ngày trước`;
+    if (ageDays < 30) return `📅 ${Math.floor(ageDays / 7)} tuần trước`;
+    if (ageDays < 365) return `📅 ${Math.floor(ageDays / 30)} tháng trước`;
+    return `📅 ${Math.floor(ageDays / 365)} năm trước`;
   };
 
   const fetchChatMessages = async (chatId, { force = false } = {}) => {
@@ -1750,15 +1785,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   init();
 });
-  const formatScoreDisplay = (source) => {
-    if (!source || typeof source !== 'object') return '';
-    const relevance = Number(source.relevance);
-    if (!Number.isNaN(relevance) && relevance > 0) {
-      return `${Math.round(Math.min(relevance, 1) * 100)}%`;
-    }
-    const score = Number(source.score);
-    if (!Number.isNaN(score) && Number.isFinite(score)) {
-      return score.toFixed(3);
-    }
-    return '';
-  };
+const formatScoreDisplay = (source) => {
+  if (!source || typeof source !== 'object') return '';
+  const relevance = Number(source.relevance);
+  if (!Number.isNaN(relevance) && relevance > 0) {
+    return `${Math.round(Math.min(relevance, 1) * 100)}%`;
+  }
+  const score = Number(source.score);
+  if (!Number.isNaN(score) && Number.isFinite(score)) {
+    return score.toFixed(3);
+  }
+  return '';
+};

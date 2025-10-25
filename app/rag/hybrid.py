@@ -31,6 +31,8 @@ def hybrid_retrieve(
     top_k: int = 10,
     alpha: float = 0.6,
     mmr_lambda: float = 0.5,
+    recency_weight: float = 0.0,  # ← NEW: Weight cho recency boost
+    recency_mode: str = "exponential",  # ← NEW: Decay mode
 ) -> List[Chunk]:
     """
     Kết hợp dense (cosine) + sparse (BM25) rồi MMR.
@@ -71,20 +73,67 @@ def hybrid_retrieve(
     bm25_scores = np.array(bm25.get_scores(q_tokens), dtype=np.float32)
     bm2501 = _norm01(bm25_scores)
 
-    # 3) Hợp nhất
-    combo = alpha * dense01 + (1 - alpha) * bm2501
+    # 3) Hợp nhất với recency boost (nếu enabled)
+    if recency_weight > 0:
+        # Import ở đây để tránh circular dependency
+        from datetime import datetime
+
+        current_time = datetime.now().timestamp()
+
+        # Compute recency scores
+        recency_scores = []
+        for gid in cand_ids:
+            item = store.items[gid]
+            timestamp = item.meta.get("upload_timestamp", 0) if item.meta else 0
+
+            if timestamp > 0:
+                age_days = (current_time - timestamp) / 86400.0
+                if recency_mode == "exponential":
+                    half_life = 30.0
+                    recency = np.exp(-age_days / half_life)
+                elif recency_mode == "linear":
+                    max_age = 90.0
+                    recency = max(0.0, 1.0 - (age_days / max_age))
+                elif recency_mode == "step":
+                    if age_days <= 7:
+                        recency = 1.0
+                    elif age_days <= 30:
+                        recency = 0.8
+                    elif age_days <= 90:
+                        recency = 0.5
+                    else:
+                        recency = 0.2
+                else:
+                    recency = 1.0
+            else:
+                recency = 0.5  # Default for unknown timestamp
+
+            recency_scores.append(recency)
+
+        recency_scores = np.array(recency_scores, dtype=np.float32)
+
+        # Combine: (1 - recency_weight) * hybrid + recency_weight * recency
+        combo = (1.0 - recency_weight) * combo + recency_weight * recency_scores
+
+    # 4) Sort và lấy top candidates
     order = np.argsort(-combo)[: max(top_k * 3, top_k)]
     cand_top = [cand_ids[j] for j in order.tolist()]
 
     score_meta = {}
     for idx, gid in enumerate(cand_ids):
-        score_meta[gid] = {
+        meta_entry = {
             "dense_score_raw": float(dense_sims[idx]),
             "dense_score": float(dense01[idx]),
             "bm25_score_raw": float(bm25_scores[idx]),
             "bm25_score": float(bm2501[idx]),
             "hybrid_score": float(combo[idx]),
         }
+
+        # Add recency info nếu có
+        if recency_weight > 0 and len(recency_scores) > idx:
+            meta_entry["recency_score"] = float(recency_scores[idx])
+
+        score_meta[gid] = meta_entry
 
     # 4) MMR (trên vector dense) để đa dạng
     chosen: list[int] = []

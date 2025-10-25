@@ -22,6 +22,9 @@ def chunk_pages(
     doc_name: str,
     chunk_size: int = 400,
     overlap: int = 50,
+    upload_timestamp: float = None,
+    document_status: str = "active",
+    document_version: int = 1,
 ) -> List[Chunk]:
     """Nhận (page, text) -> trả về danh sách Chunk token-aware với semantic enhancement."""
     out: List[Chunk] = []
@@ -47,12 +50,18 @@ def chunk_pages(
                     chunk_id=cid,
                     text=chunk_text,
                     n_tokens=len(chunk_ids),
+                    upload_timestamp=upload_timestamp,
+                    document_status=document_status,
+                    document_version=document_version,
                     meta={
                         "doc": doc_name,
                         "page": page_no,
                         "start_token": 0,  # Có thể cải tiến sau
                         "end_token": len(chunk_ids),
                         "semantic_chunk": True,
+                        "upload_timestamp": upload_timestamp,
+                        "document_status": document_status,
+                        "document_version": document_version,
                     },
                 )
             )

@@ -32,6 +32,7 @@ from app.rag.chat_manager import (
     load_chat,
     rename_chat as rename_chat_entry,
 )
+from app.rag.document_tracker import SmartDocumentTracker  # ← NEW
 
 load_dotenv()
 router = APIRouter()
@@ -355,6 +356,9 @@ async def ingest(
     CHUNK_SIZE = get_int("CHUNK_SIZE", 380)
     CHUNK_OVERLAP = get_int("CHUNK_OVERLAP", 50)
 
+    # Initialize document tracker ← NEW
+    doc_tracker = SmartDocumentTracker(folder)
+
     manifest_path = os.path.join(folder, MANIFEST_NAME)
     existing_docs_map: dict[str, dict] = {}
     if os.path.exists(manifest_path):
@@ -389,9 +393,38 @@ async def ingest(
             pdf_bytes = pdf_file.read()
         pages = load_pdf(pdf_bytes, ocr=bool(ocr), ocr_lang="vie+eng")
 
-        # 2) Chunk token-aware
+        # 1.5) Register document và detect version/duplicate ← NEW
+        normalized_text = " ".join(text for _, text in pages)
+        chunk_ids_placeholder = []  # Will be updated after chunking
+
+        doc_status, doc_message, superseded_doc = doc_tracker.register_document(
+            filename=fname,
+            raw_content=pdf_bytes,
+            normalized_text=normalized_text,
+            pages=pages,
+            chunk_ids=chunk_ids_placeholder,
+        )
+
+        doc_metadata = doc_tracker.get_document_metadata(fname)
+        upload_timestamp = (
+            doc_metadata.upload_timestamp if doc_metadata else time.time()
+        )
+        document_status = doc_metadata.status if doc_metadata else "active"
+        document_version = doc_metadata.version if doc_metadata else 1
+
+        app_logger.info(
+            "[ingest] Document '%s': %s - %s", fname, doc_status, doc_message
+        )
+
+        # 2) Chunk token-aware với enhanced metadata ← UPDATED
         chunks = chunk_pages(
-            pages, doc_name=fname, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP
+            pages,
+            doc_name=fname,
+            chunk_size=CHUNK_SIZE,
+            overlap=CHUNK_OVERLAP,
+            upload_timestamp=upload_timestamp,  # ← NEW
+            document_status=document_status,  # ← NEW
+            document_version=document_version,  # ← NEW
         )
         if len(chunks) == 0:
             return JSONResponse(
@@ -406,6 +439,11 @@ async def ingest(
             "doc": fname,
             "pages": len(pages),
             "chunks": len(chunks),
+            "status": doc_status,  # ← NEW
+            "message": doc_message,  # ← NEW
+            "upload_timestamp": upload_timestamp,  # ← NEW
+            "document_status": document_status,  # ← NEW
+            "version": document_version,  # ← NEW
         }
         docs_summary.append(doc_summary)
         new_docs_summary.append(doc_summary)
@@ -449,6 +487,10 @@ async def ingest(
         if name not in docs_by_name:
             docs_by_name[name] = doc
     combined_docs = sorted(docs_by_name.values(), key=lambda d: d.get("doc", ""))
+
+    # Get document tracking statistics ← NEW
+    doc_stats = doc_tracker.get_statistics()
+
     manifest = {
         "session_id": session_id,
         "docs": combined_docs,
@@ -457,6 +499,7 @@ async def ingest(
         "ocr": bool(ocr),
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
+        "document_stats": doc_stats,  # ← NEW
     }
     with open(manifest_path, "w", encoding="utf-8") as w:
         json.dump(manifest, w, ensure_ascii=False, indent=2)
@@ -469,6 +512,7 @@ async def ingest(
         "docs": combined_docs,
         "skipped": skipped_docs,
         "latency_ms": latency,
+        "document_stats": doc_stats,  # ← NEW
     }
 
     if background:
@@ -637,6 +681,12 @@ async def ask(
         MIN_CONTEXT_PROB = get_float("ANSWER_MIN_CONTEXT_PROB", 0.3)
         MIN_DIRECT_PROB = get_float("ANSWER_MIN_DIRECT_PROB", 0.2)
 
+        # Recency boost configuration ← NEW
+        RECENCY_WEIGHT = get_float("RECENCY_WEIGHT", 0.3)  # Default 30% weight
+        RECENCY_MODE = os.getenv(
+            "RECENCY_MODE", "exponential"
+        )  # exponential | linear | step
+
         # Special config for summary queries
         is_summary_query = any(
             word in query.lower()
@@ -701,10 +751,10 @@ async def ask(
                     [s.strip() for s in selected_docs.split(",") if s.strip()]
                 )
 
-        # 3) Retrieve (hybrid hoặc vector-only)
+        # 3) Retrieve (hybrid hoặc vector-only) với recency boost ← UPDATED
         app_logger.info("Retrieving relevant passages...")
         if HYBRID_ON:
-            app_logger.info("Using hybrid search (BM25 + Vector)...")
+            app_logger.info("Using hybrid search (BM25 + Vector) with recency boost...")
             retrieved = hybrid_retrieve(
                 query_vec=qvec,
                 query_text=query.strip(),
@@ -713,6 +763,8 @@ async def ask(
                 top_k=TOP_K,
                 alpha=HYBRID_ALPHA,
                 mmr_lambda=MMR_LAMBDA,
+                recency_weight=RECENCY_WEIGHT,  # ← NEW
+                recency_mode=RECENCY_MODE,  # ← NEW
             )
         else:
             app_logger.info("Using vector search only...")
@@ -815,6 +867,7 @@ async def ask(
         citation_pairs = _extract_citation_pairs(answer)
         passages_for_sources: list[Chunk] = []
         if citation_pairs:
+
             def _passage_matches(p: Chunk) -> bool:
                 doc = p.doc_name
                 page_str = str(p.page)
@@ -824,9 +877,7 @@ async def ask(
                     or (doc, "") in citation_pairs
                 )
 
-            passages_for_sources = [
-                p for p in passages if _passage_matches(p)
-            ]
+            passages_for_sources = [p for p in passages if _passage_matches(p)]
 
         if not citation_pairs or not passages_for_sources:
             passages_for_sources = []
@@ -838,6 +889,11 @@ async def ask(
                 "score": float(p.score or 0.0),
                 "relevance": float((p.meta or {}).get("relevance", 0.0)),
                 "content": (p.text[:300] + "…") if len(p.text) > 320 else p.text,
+                # Enhanced metadata ← NEW
+                "upload_timestamp": p.upload_timestamp,
+                "document_status": p.document_status,
+                "document_version": p.document_version,
+                "recency_score": (p.meta or {}).get("recency_score"),
             }
             for p in passages_for_sources
         ]
