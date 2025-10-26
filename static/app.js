@@ -1059,8 +1059,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.sourceKey = buildSourceKey(source.filename, source.page);
       card.tabIndex = 0;
 
-      // Enhanced: Add status badge and age info with fallbacks
-      const statusBadge = getStatusBadge(source.document_status);
+      // Enhanced: Add recency badge and age info
       const ageInfo = getAgeInfo(source.upload_timestamp);
       const recencyBadge = (source.recency_score !== undefined && source.recency_score !== null) ?
         `<span class="badge bg-info ms-1" title="Recency Score">📈 ${(source.recency_score * 100).toFixed(0)}%</span>` : '';
@@ -1074,7 +1073,6 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="card-body">
             <h6 class="card-title">
               <span class="citation-tag" title="Click để xem chi tiết">${source.filename}:${source.page}</span>
-              ${statusBadge}
               ${recencyBadge}
             </h6>
             <p class="card-text small">${source.content}</p>
@@ -1332,8 +1330,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusLine = `${statusLine} • ${fileWrapper.error}`;
       }
 
-      // ✅ NEW: Add document status badge and age info
-      const docStatusBadge = fileWrapper.document_status ? getStatusBadge(fileWrapper.document_status) : '';
+      // ✅ Add age info
       const ageInfo = fileWrapper.upload_timestamp ? getAgeInfo(fileWrapper.upload_timestamp) : '';
       const statusMessage = fileWrapper.status_message ? `<br><small class="text-muted">${fileWrapper.status_message}</small>` : '';
 
@@ -1343,7 +1340,6 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="file-details">
             <div class="file-name" title="${fileName}">
               ${fileName}
-              ${docStatusBadge}
             </div>
             <div class="file-status">
               ${statusLine}
