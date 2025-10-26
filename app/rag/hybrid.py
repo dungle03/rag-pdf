@@ -167,15 +167,22 @@ def hybrid_retrieve(
         it = store.items[gid]
         meta = dict(it.meta or {})
         meta.update(score_meta.get(gid, {}))
+
+        # ✅ FIX: Extract enhanced metadata to top-level Chunk fields
         out.append(
             Chunk(
-                doc_name=meta["doc"],
-                page=meta["page"],
-                chunk_id=meta["chunk_id"],
+                doc_name=meta.get("doc", "unknown"),
+                page=meta.get("page", 0),
+                chunk_id=meta.get("chunk_id", 0),
                 text=it.text,
                 n_tokens=0,
                 score=meta.get("hybrid_score", 0.0),
                 meta=meta,
+                # ✅ NEW: Pass enhanced metadata to top-level fields
+                upload_timestamp=meta.get("upload_timestamp"),
+                document_status=meta.get("document_status"),
+                document_version=meta.get("document_version"),
+                recency_score=meta.get("recency_score"),
             )
         )
     return out

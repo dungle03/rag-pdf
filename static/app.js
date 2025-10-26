@@ -1059,11 +1059,16 @@ document.addEventListener('DOMContentLoaded', () => {
       card.dataset.sourceKey = buildSourceKey(source.filename, source.page);
       card.tabIndex = 0;
 
-      // Enhanced: Add status badge and age info
+      // Enhanced: Add status badge and age info with fallbacks
       const statusBadge = getStatusBadge(source.document_status);
       const ageInfo = getAgeInfo(source.upload_timestamp);
-      const recencyBadge = source.recency_score ?
-        `<span class="badge bg-info ms-1" title="Recency Score">📅 ${(source.recency_score * 100).toFixed(0)}%</span>` : '';
+      const recencyBadge = (source.recency_score !== undefined && source.recency_score !== null) ?
+        `<span class="badge bg-info ms-1" title="Recency Score">📈 ${(source.recency_score * 100).toFixed(0)}%</span>` : '';
+
+      // Build metadata line
+      const metadataLine = [ageInfo, recencyBadge ? 'Recency: ' + (source.recency_score * 100).toFixed(0) + '%' : '']
+        .filter(Boolean)
+        .join(' | ') || '';
 
       card.innerHTML = `
           <div class="card-body">
@@ -1074,8 +1079,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </h6>
             <p class="card-text small">${source.content}</p>
             <div class="d-flex justify-content-between align-items-center">
-              <small class="text-muted">${ageInfo}</small>
-              <small class="text-muted">Mức khớp: ${formatScoreDisplay(source)}</small>
+              <small class="text-muted">${metadataLine || 'Mức khớp: ' + formatScoreDisplay(source)}</small>
+              ${metadataLine ? `<small class="text-muted">Mức khớp: ${formatScoreDisplay(source)}</small>` : ''}
             </div>
           </div>`;
       const activate = (event) => {
@@ -1095,11 +1100,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Helper functions for document status and age
   const getStatusBadge = (status) => {
     const badges = {
-      'active': '<span class="badge bg-success ms-1" title="Tài liệu mới nhất">✨ Mới</span>',
+      'active': '<span class="badge bg-success ms-1" title="Tài liệu hoạt động">✨ Mới</span>',
       'superseded': '<span class="badge bg-warning text-dark ms-1" title="Đã được cập nhật">📝 Cũ</span>',
       'archived': '<span class="badge bg-secondary ms-1" title="Đã lưu trữ">📦 Archive</span>'
     };
     return badges[status] || '';
+  };
+
+  const getRecencyBadge = (score) => {
+    if (score === undefined || score === null) return '';
+    const percentage = Math.round(score * 100);
+    return `<span class="badge bg-info ms-1" title="Recency Score">📈 ${percentage}%</span>`;
   };
 
   const getAgeInfo = (timestamp) => {
@@ -1321,12 +1332,24 @@ document.addEventListener('DOMContentLoaded', () => {
         statusLine = `${statusLine} • ${fileWrapper.error}`;
       }
 
+      // ✅ NEW: Add document status badge and age info
+      const docStatusBadge = fileWrapper.document_status ? getStatusBadge(fileWrapper.document_status) : '';
+      const ageInfo = fileWrapper.upload_timestamp ? getAgeInfo(fileWrapper.upload_timestamp) : '';
+      const statusMessage = fileWrapper.status_message ? `<br><small class="text-muted">${fileWrapper.status_message}</small>` : '';
+
       fileItem.innerHTML = `
         <div class="file-info">
           <div class="file-icon"><i class="bi bi-file-earmark-pdf-fill"></i></div>
           <div class="file-details">
-            <div class="file-name" title="${fileName}">${fileName}</div>
-            <div class="file-status">${statusLine}</div>
+            <div class="file-name" title="${fileName}">
+              ${fileName}
+              ${docStatusBadge}
+            </div>
+            <div class="file-status">
+              ${statusLine}
+              ${ageInfo ? ` • ${ageInfo}` : ''}
+              ${statusMessage}
+            </div>
           </div>
         </div>
         <div class="file-actions">

@@ -188,6 +188,15 @@ def _session_snapshot(session_id: str) -> dict:
                 "pages": doc_meta.get("pages", 0) if doc_meta else 0,
                 "chunks": doc_meta.get("chunks", 0) if doc_meta else 0,
                 "status": status,
+                # ✅ NEW: Enhanced metadata for UI display
+                "upload_timestamp": (
+                    doc_meta.get("upload_timestamp") if doc_meta else None
+                ),
+                "document_status": (
+                    doc_meta.get("document_status", "active") if doc_meta else "active"
+                ),
+                "document_version": doc_meta.get("version", 1) if doc_meta else 1,
+                "status_message": doc_meta.get("message") if doc_meta else None,
             }
         )
 

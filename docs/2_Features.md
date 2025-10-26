@@ -375,8 +375,6 @@ Chunk B (từ document 3 ngày tuổi):
 
 ### Bảng cấu hình Recency Boost
 
-### Bảng cấu hình Recency Boost
-
 | Biến | Mô tả chi tiết | Giá trị mặc định | Range | Khuyến nghị |
 |---|---|---|---|---|
 | `RECENCY_WEIGHT` | Trọng số của recency trong công thức final score.<br/>• `0.0`: Tắt hoàn toàn (chỉ dùng relevance)<br/>• `0.3`: Default - cân bằng<br/>• `0.5`: Maximum - ưu tiên mạnh content mới | `0.3` | `0.0 - 0.5` | • `0.0` cho textbooks, historical content<br/>• `0.2-0.3` cho documentation<br/>• `0.4-0.5` cho news, policy updates |

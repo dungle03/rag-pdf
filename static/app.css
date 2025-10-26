@@ -544,11 +544,22 @@ body {
   text-overflow: ellipsis;
   font-weight: 500;
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.file-name .badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .file-status {
   font-size: 0.8rem;
   color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 .file-actions .btn-icon {
@@ -717,11 +728,11 @@ body {
   color: var(--text-primary);
 }
 
-.bubble-content-body > *:first-child {
+.bubble-content-body>*:first-child {
   margin-top: 0;
 }
 
-.bubble-content-body > *:last-child {
+.bubble-content-body>*:last-child {
   margin-bottom: 0;
 }
 
@@ -1182,6 +1193,21 @@ display: inline-block;
 .citations-list .card {
   margin-bottom: 1rem;
   background-color: var(--bg-tertiary);
+}
+
+/* ✅ NEW: Enhanced citation card styling */
+.citations-list .card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.citations-list .card-title .badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  font-weight: 500;
 }
 
 .citation-ref {
