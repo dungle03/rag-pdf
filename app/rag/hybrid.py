@@ -73,7 +73,12 @@ def hybrid_retrieve(
     bm25_scores = np.array(bm25.get_scores(q_tokens), dtype=np.float32)
     bm2501 = _norm01(bm25_scores)
 
-    # 3) Hợp nhất với recency boost (nếu enabled)
+    # 3) Kết hợp dense + sparse thành điểm hybrid cơ bản
+    combo = (1.0 - alpha) * dense01 + alpha * bm2501
+
+    recency_scores: np.ndarray | None = None
+
+    # 4) Áp dụng recency boost (nếu bật)
     if recency_weight > 0:
         # Import ở đây để tránh circular dependency
         from datetime import datetime
@@ -115,7 +120,7 @@ def hybrid_retrieve(
         # Combine: (1 - recency_weight) * hybrid + recency_weight * recency
         combo = (1.0 - recency_weight) * combo + recency_weight * recency_scores
 
-    # 4) Sort và lấy top candidates
+    # 5) Sort và lấy top candidates
     order = np.argsort(-combo)[: max(top_k * 3, top_k)]
     cand_top = [cand_ids[j] for j in order.tolist()]
 
@@ -130,12 +135,16 @@ def hybrid_retrieve(
         }
 
         # Add recency info nếu có
-        if recency_weight > 0 and len(recency_scores) > idx:
+        if (
+            recency_weight > 0
+            and recency_scores is not None
+            and len(recency_scores) > idx
+        ):
             meta_entry["recency_score"] = float(recency_scores[idx])
 
         score_meta[gid] = meta_entry
 
-    # 4) MMR (trên vector dense) để đa dạng
+    # 6) MMR (trên vector dense) để đa dạng
     chosen: list[int] = []
     while len(chosen) < min(top_k, len(cand_top)):
         best_gid = None
@@ -152,7 +161,7 @@ def hybrid_retrieve(
                 best_val, best_gid = mmr, gid
         chosen.append(best_gid)
 
-    # 5) Xuất dạng Chunk
+    # 7) Xuất dạng Chunk
     out: List[Chunk] = []
     for gid in chosen:
         it = store.items[gid]
