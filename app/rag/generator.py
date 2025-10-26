@@ -59,7 +59,13 @@ def _build_context(passages: List[Chunk]) -> str:
             relevance = float(p.meta.get("relevance", 0.0) or 0.0)
         elif getattr(p, "score", None) is not None:
             relevance = _sigmoid(p.score)
-        header = f"[{idx}] {p.doc_name}:{p.page} (độ phù hợp ≈ {relevance:.2f})"
+
+        # ✅ FIX: Ưu tiên "filename" từ metadata, fallback về doc_name
+        filename = p.doc_name  # Default
+        if isinstance(getattr(p, "meta", None), dict):
+            filename = p.meta.get("filename", p.meta.get("doc", p.doc_name))
+
+        header = f"[{idx}] {filename}:{p.page} (độ phù hợp ≈ {relevance:.2f})"
         text = p.text.replace("\n", " ").strip()
         if len(text) > 1200:
             text = text[:1200] + "…"
@@ -292,13 +298,9 @@ Sử dụng markdown, trích dẫn chính xác, đảm bảo logic và đầy đ
             chunk_scores.sort(reverse=True)
             primary = chunk_scores[0]
             support_vals = chunk_scores[1:3]
-            support = (
-                sum(support_vals) / len(support_vals) if support_vals else primary
-            )
+            support = sum(support_vals) / len(support_vals) if support_vals else primary
             high_quality = len([s for s in chunk_scores if s >= 0.6])
-            coverage_ratio = min(
-                1.0, high_quality / max(1, len(chunk_scores))
-            )
+            coverage_ratio = min(1.0, high_quality / max(1, len(chunk_scores)))
             consistency = 1.0 - min(1.0, abs(primary - support))
 
             blended = (

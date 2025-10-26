@@ -103,10 +103,20 @@ class FAISSStore:
         print(f"Đã lưu index vào {self.db_path}")
 
         for i, c in enumerate(chunks):
+            # Preserve full metadata from chunk.meta, with fallback to basic fields
+            full_meta = {
+                "doc": c.doc_name,
+                "page": c.page,
+                "chunk_id": c.chunk_id,
+            }
+            # Merge with chunk.meta to preserve additional fields like "filename"
+            if c.meta:
+                full_meta.update(c.meta)
+
             self.items.append(
                 VSItem(
                     vec=vectors[i],
-                    meta={"doc": c.doc_name, "page": c.page, "chunk_id": c.chunk_id},
+                    meta=full_meta,
                     text=c.text,
                 )
             )

@@ -884,7 +884,10 @@ async def ask(
 
         sources = [
             {
-                "filename": p.doc_name,
+                # ✅ FIX: Ưu tiên "filename" từ metadata
+                "filename": (p.meta or {}).get(
+                    "filename", (p.meta or {}).get("doc", p.doc_name)
+                ),
                 "page": p.page,
                 "score": float(p.score or 0.0),
                 "relevance": float((p.meta or {}).get("relevance", 0.0)),

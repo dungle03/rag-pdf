@@ -55,6 +55,7 @@ def chunk_pages(
                     document_version=document_version,
                     meta={
                         "doc": doc_name,
+                        "filename": doc_name,  # ✅ FIX: Thêm filename để citation hiển thị đúng
                         "page": page_no,
                         "start_token": 0,  # Có thể cải tiến sau
                         "end_token": len(chunk_ids),
