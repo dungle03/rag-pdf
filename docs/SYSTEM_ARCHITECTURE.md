@@ -43,13 +43,13 @@ Hệ thống bao gồm các module chính sau:
     *   Output: Text theo từng trang với metadata.
 
 2.  **Chunking Engine** (`chunking.py`)
-    *   Chia văn bản thành chunks 512-1024 tokens.
+    *   Chia văn bản thành chunks 400 tokens (default).
     *   Áp dụng overlapping 50 tokens.
     *   Gắn metadata cho mỗi chunk.
 
 3.  **Embedding Service** (`embeddings.py`)
-    *   Load model Sentence-Transformers / Google Gemini Embeddings.
-    *   Chuyển text → vector 384+ chiều.
+    *   Load model Google Gemini `text-embedding-004`.
+    *   Chuyển text → vector 768 chiều.
     *   Cache embeddings để tái sử dụng.
 
 4.  **Vector Store Manager** (`vectorstore.py`)
@@ -153,16 +153,16 @@ Mỗi chunk (đoạn văn bản) được lưu trữ với cấu trúc sau:
 
 ```python
 class Chunk:
-    chunk_id: str           # ID unique của chunk (UUID)
+    chunk_id: int           # ID (sequential integer per doc)
     text: str              # Nội dung văn bản của chunk
-    document_name: str     # Tên file gốc (VD: "policy.pdf")
-    page_number: int       # Số trang trong PDF (bắt đầu từ 1)
+    doc_name: str          # Tên file gốc (VD: "policy.pdf")
+    page: int              # Số trang trong PDF (bắt đầu từ 1)
     chunk_index: int       # Thứ tự chunk trong document
     upload_timestamp: float # Unix timestamp khi upload
     document_status: str   # "active", "superseded", "archived"
     document_version: int  # Version number (1, 2, 3...)
     recency_score: float   # Điểm ưu tiên (0.0-1.0)
-    embedding: List[float] # Vector 384 chiều (không lưu trong JSON)
+    embedding: List[float] # Vector 768 chiều (không lưu trong JSON)
 ```
 
 **Ví dụ:**
@@ -295,16 +295,16 @@ class Source:
 
 **FAISS Index:**
 
-*   **Index Type:** `IndexFlatL2` (cho < 100K vectors) hoặc `IndexIVFFlat` (cho > 100K)
-*   **Dimension:** 384 (theo Sentence-Transformers model)
-*   **Distance Metric:** L2 distance (chuyển đổi sang cosine similarity)
+*   **Index Type:** `faiss.IndexFlatIP` (Inner Product).
+*   **Dimension:** 768 (tương ứng với model `text-embedding-004`)
+*   **Distance Metric:** Dot product (tương đương Cosine Similarity do vectors đã được L2-normalized)
 
 **Storage:**
 
 ```text
 uploads/{session_id}/
 ├── faiss_index.bin          # FAISS index file
-├── chunk_metadata.json      # Metadata của tất cả chunks
+├── items.jsonl              # Metadata & content của tất cả chunks (JSON Lines)
 ├── document_fingerprints.json
 ├── session_manifest.json
 ├── chat_history.json
@@ -324,7 +324,7 @@ uploads/{session_id}/
 ```python
 # LRU Cache với max 1000 entries
 cache_key = hash(text)
-cache_value = embedding_vector  # numpy array (384,)
+cache_value = embedding_vector  # numpy array (768,)
 ```
 
 **Answer Cache:**
