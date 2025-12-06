@@ -319,26 +319,22 @@ uploads/{session_id}/
 
 ## 2.3.6. Cache Structure
 
-**Embedding Cache:**
+**Embedding Cache (`app/rag/cache.py`):**
 
-```python
-# LRU Cache với max 1000 entries
-cache_key = hash(text)
-cache_value = embedding_vector  # numpy array (768,)
-```
+*   **Type:** Persistent Cache.
+*   **Backend:** SQLite Database (`embed_cache.sqlite`).
+*   **Schema:** `(k TEXT PRIMARY KEY, dim INTEGER, vec BLOB)`
+*   **Mechanism:** Hash(text) -> Embedding Vector (768 dim).
 
-**Answer Cache:**
+**Answer Cache (`app/rag/answer_cache.py`):**
 
-```python
-# Cache với TTL 1 hour
-cache_key = hash(query + context_fingerprint)
-cache_value = {
-    "answer": str,
-    "sources": List[Source],
-    "timestamp": float
-}
-```
+*   **Type:** Persistent Cache.
+*   **Backend:** SQLite Database (`answer_cache.sqlite`).
+*   **TTL:** Không giới hạn cứng (có thể clear bằng cách xóa file DB).
+*   **Schema:** `(k TEXT, answer TEXT, confidence REAL, citations TEXT, ts INTEGER)`
+*   **Key Generation:** `k = question + sorted(available_docs)`
 
-**Storage:** Pickle files
-*   `uploads/{session_id}/embedding_cache.pkl`
-*   `uploads/{session_id}/answer_cache.pkl`
+**Storage Locations:**
+
+*   `storage/embed_cache.sqlite` (Global cache cho embeddings)
+*   `storage/answer_cache.sqlite` (Global cache cho QA pairs)
