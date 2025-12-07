@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
+load_dotenv()  # Load env vars before importing modules that use them
+
 from app.utils import security
 from app.utils.logger import app_logger
 from app.utils.schema import Chunk
