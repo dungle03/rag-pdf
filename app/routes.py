@@ -970,6 +970,62 @@ async def create_session(title: str | None = Form(None)):
     }
     with open(os.path.join(session_folder, MANIFEST_NAME), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    # Auto-generate title with incrementing index to avoid "Cuộc trò chuyện 1" everywhere
+    if not title:
+        max_index = 0
+        try:
+            if os.path.isdir(UPLOAD_DIR):
+                for sid in os.listdir(UPLOAD_DIR):
+                    if sid == session_id:
+                        continue
+                    # Quick check manifest first to avoid heavy chat listing
+                    mpath = os.path.join(UPLOAD_DIR, sid, MANIFEST_NAME)
+                    if not os.path.exists(mpath):
+                        continue
+
+                    # We need the title.
+                    # If manifest has docs but no specific title, we might have to check chats.
+                    # But for speed, let's just check if we can get a title from _session_summary logic
+                    # Or simpler: just list chats in that folder
+
+                    # Let's try to be robust: check cached manifest or list chats
+                    # To keep it simple and correct, we'll mimic list_sessions logic but stripped down
+                    stitle = "Cuộc trò chuyện"
+                    # Try reading primary chat
+                    chat_dir = os.path.join(UPLOAD_DIR, sid, "chats")
+                    if os.path.isdir(chat_dir):
+                        # Find first created or updated?
+                        # list_chats sorts by updated desc. We need any chat that defines the title.
+                        # Usually the first chat defines the session title.
+                        cfiles = [
+                            f for f in os.listdir(chat_dir) if f.endswith(".json")
+                        ]
+                        if cfiles:
+                            try:
+                                with open(
+                                    os.path.join(chat_dir, cfiles[0]),
+                                    "r",
+                                    encoding="utf-8",
+                                ) as cf:
+                                    cdata = json.load(cf)
+                                    stitle = cdata.get("title", "Cuộc trò chuyện")
+                            except:
+                                pass
+
+                    if stitle.startswith("Cuộc trò chuyện"):
+                        parts = stitle.split()
+                        if parts and parts[-1].isdigit():
+                            idx = int(parts[-1])
+                            if idx > max_index:
+                                max_index = idx
+                        elif stitle.strip() == "Cuộc trò chuyện":
+                            if max_index < 1:
+                                max_index = 1
+        except Exception:
+            pass
+        title = f"Cuộc trò chuyện {max_index + 1}"
+
     chat_meta = create_chat(UPLOAD_DIR, session_id, title)
     summary = _session_summary(session_id)
     return {
@@ -1020,6 +1076,29 @@ async def rename_session(
         return JSONResponse(status_code=404, content={"error": "Chat không tồn tại"})
     summary = _session_summary(session_id)
     return {"session": summary}
+
+
+@router.delete("/sessions/all")
+async def delete_all_sessions():
+    """Delete ALL sessions and wipe data"""
+    try:
+        if os.path.isdir(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                path = os.path.join(UPLOAD_DIR, filename)
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                except Exception:
+                    pass
+        # Clean up vector stores in memory if needed
+        # (Assuming drop_store handles non-existent gracefully or we just clear UPLOAD_DIR)
+        return {"deleted": True, "message": "All sessions deleted"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500, content={"error": f"Internal server error: {str(e)}"}
+        )
 
 
 @router.delete("/session/{session_id}")

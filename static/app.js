@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const dom = {
     themeToggle: document.getElementById('theme-toggle'),
     newSessionBtn: document.getElementById('btn-new-session'),
+    deleteAllSessionsBtn: document.getElementById('btn-delete-all-sessions'),
     chatList: document.getElementById('chat-list'),
     fileInput: document.getElementById('file-input'),
     fileUploader: document.getElementById('file-uploader'),
@@ -1760,6 +1761,42 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   dom.newSessionBtn.addEventListener('click', startNewSession);
+
+  if (dom.deleteAllSessionsBtn) {
+    dom.deleteAllSessionsBtn.addEventListener('click', async () => {
+      if (!confirm('Bạn có chắc chắn muốn XOÁ TẤT CẢ các cuộc trò chuyện? Hành động này không thể hoàn tác!')) {
+        return;
+      }
+
+      try {
+        setStatus('Đang xoá dữ liệu...', 'processing');
+        const response = await fetch('/sessions/all', { method: 'DELETE' });
+        if (!response.ok) throw new Error('Không thể xoá dữ liệu');
+
+        // Success: clear local state and UI
+        state.sessionId = null;
+        resetChatState({ preserveSessions: false });
+        clearSessionFromStorage();
+        if (dom.sessionIdBadge) {
+          dom.sessionIdBadge.textContent = 'Chưa bắt đầu';
+          dom.sessionIdBadge.classList.add('session-id-empty');
+        }
+        if (dom.sessionDocCount) dom.sessionDocCount.textContent = '0 tài liệu';
+        if (dom.sessionChatCount) dom.sessionChatCount.textContent = '0 cuộc trò chuyện';
+
+        // Fix: Explicitly clear file list
+        state.files = [];
+        renderFileList();
+
+        showToast('Đã xoá tất cả dữ liệu thành công', 'success');
+        setStatus('Sẵn sàng');
+      } catch (e) {
+        console.error(e);
+        showToast('Lỗi khi xoá dữ liệu: ' + e.message, 'error');
+        setStatus('Lỗi', 'error');
+      }
+    });
+  }
 
   dom.chatList.addEventListener('click', async (event) => {
     const actionButton = event.target.closest('button[data-action]');
